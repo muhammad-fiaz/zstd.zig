@@ -25,12 +25,6 @@ pub fn build(b: *std.Build) void {
     const run_tests = b.addRunArtifact(tests);
     test_step.dependOn(&run_tests.step);
 
-    const fmt_step = b.step("fmt", "Format source files");
-    const fmt = b.addFmt(.{
-        .paths = &.{ b.path("src"), b.path("build.zig") },
-    });
-    fmt_step.dependOn(&fmt.step);
-
     const docs_step = b.step("docs", "Generate documentation");
     const docs = b.addTest(.{
         .root_module = zstd_mod,

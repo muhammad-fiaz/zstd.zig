@@ -17,14 +17,14 @@ pub fn compressFile(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     });
     defer comp.deinit();
 
-    var output: [zstd.recommendedCOutSize()]u8 = undefined;
+    var output: [zstd.recommendedOutSize()]u8 = undefined;
     var result = std.ArrayList(u8).empty;
     defer result.deinit(allocator);
 
     // Process input in chunks
     var pos: usize = 0;
     while (pos < input.len) {
-        const end = @min(pos + zstd.recommendedCInSize(), input.len);
+        const end = @min(pos + zstd.recommendedInSize(), input.len);
         const chunk = input[pos..end];
 
         const r = try comp.compressChunk(chunk, &output, .@"continue");
@@ -51,13 +51,13 @@ pub fn decompressStream(allocator: std.mem.Allocator, compressed: []const u8) ![
     var decomp = zstd.StreamDecompressor.init(allocator, .{});
     defer decomp.deinit();
 
-    var output: [zstd.recommendedDOutSize()]u8 = undefined;
+    var output: [zstd.recommendedDecompressOutSize()]u8 = undefined;
     var result = std.ArrayList(u8).empty;
     defer result.deinit(allocator);
 
     var pos: usize = 0;
     while (pos < compressed.len) {
-        const end = @min(pos + zstd.recommendedDInSize(), compressed.len);
+        const end = @min(pos + zstd.recommendedDecompressInSize(), compressed.len);
         const chunk = compressed[pos..end];
 
         const r = try decomp.decompressChunk(chunk, &output);
@@ -78,7 +78,7 @@ pub fn decompressStream(allocator: std.mem.Allocator, compressed: []const u8) ![
 var comp = zstd.StreamCompressor.init(allocator, .{});
 defer comp.deinit();
 
-var c_buf: [zstd.recommendedCOutSize()]u8 = undefined;
+var c_buf: [zstd.recommendedOutSize()]u8 = undefined;
 
 const r1 = try comp.compressChunk("Hello, ", &c_buf, .@"continue");
 const r2 = try comp.compressChunk("World!", &c_buf, .@"continue");
@@ -89,7 +89,7 @@ const r3 = try comp.endStream(&c_buf);
 var decomp = zstd.StreamDecompressor.init(allocator, .{});
 defer decomp.deinit();
 
-var d_buf: [zstd.recommendedDOutSize()]u8 = undefined;
+var d_buf: [zstd.recommendedDecompressOutSize()]u8 = undefined;
 const d1 = try decomp.decompressChunk(compressed_chunk, &d_buf);
 std.debug.print("{s}\n", .{d_buf[0..d1.bytes_written]}); // "Hello, World!"
 ```

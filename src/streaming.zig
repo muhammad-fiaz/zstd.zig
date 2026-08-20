@@ -24,19 +24,19 @@ pub const StreamDecompressOptions = struct {
     dict: ?[]const u8 = null,
 };
 
-pub fn recommendedCInSize() usize {
+pub fn recommendedInSize() usize {
     return 128 * 1024;
 }
 
-pub fn recommendedCOutSize() usize {
+pub fn recommendedOutSize() usize {
     return 128 * 1024 + 6;
 }
 
-pub fn recommendedDInSize() usize {
+pub fn recommendedDecompressInSize() usize {
     return 128 * 1024;
 }
 
-pub fn recommendedDOutSize() usize {
+pub fn recommendedDecompressOutSize() usize {
     return 128 * 1024;
 }
 
@@ -162,8 +162,8 @@ test "streaming compress decompress" {
 }
 
 test "streaming sizes" {
-    try std.testing.expect(recommendedCInSize() > 0);
-    try std.testing.expect(recommendedCOutSize() > 0);
-    try std.testing.expect(recommendedDInSize() > 0);
-    try std.testing.expect(recommendedDOutSize() > 0);
+    try std.testing.expect(recommendedInSize() > 0);
+    try std.testing.expect(recommendedOutSize() > 0);
+    try std.testing.expect(recommendedDecompressInSize() > 0);
+    try std.testing.expect(recommendedDecompressOutSize() > 0);
 }

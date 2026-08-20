@@ -234,7 +234,7 @@ gtag('config', '${GA_ID}');`,
           "Frame inspection (magic number, content size, compressed size)",
           "Cross-platform (Linux, Windows, macOS)",
           "Zero external dependencies",
-          "Zig 0.17.0+ support",
+          "Zig 0.16.0+ support",
         ],
       });
     } else {

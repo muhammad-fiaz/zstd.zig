@@ -12,11 +12,11 @@ pub const CLevel = enum(i32) {
     _,
 
     pub fn toInt(self: CLevel) i32 {
-        return @backingInt(self);
+        return @intFromEnum(self);
     }
 
     pub fn fromInt(val: i32) CLevel {
-        return @fromBackingInt(@intCast(val));
+        return @enumFromInt(@as(i32, @intCast(val)));
     }
 };
 

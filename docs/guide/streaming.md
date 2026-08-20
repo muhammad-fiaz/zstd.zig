@@ -17,7 +17,7 @@ var comp = zstd.StreamCompressor.init(allocator, .{
 });
 defer comp.deinit();
 
-var output: [zstd.recommendedCOutSize()]u8 = undefined;
+var output: [zstd.recommendedOutSize()]u8 = undefined;
 
 // Feed data in chunks
 const r1 = try comp.compressChunk(chunk1, &output, .@"continue");
@@ -40,7 +40,7 @@ if (final.bytes_written > 0) {
 var decomp = zstd.StreamDecompressor.init(allocator, .{});
 defer decomp.deinit();
 
-var output: [zstd.recommendedDOutSize()]u8 = undefined;
+var output: [zstd.recommendedDecompressOutSize()]u8 = undefined;
 
 const r1 = try decomp.decompressChunk(compressed_chunk1, &output);
 try processOutput(output[0..r1.bytes_written]);
@@ -52,10 +52,10 @@ try processOutput(output[0..r2.bytes_written]);
 ## Recommended Buffer Sizes
 
 ```zig
-const in_size = zstd.recommendedCInSize();   // 128 KB
-const out_size = zstd.recommendedCOutSize();  // 128 KB + 6
-const d_in = zstd.recommendedDInSize();       // 128 KB
-const d_out = zstd.recommendedDOutSize();     // 128 KB
+const in_size = zstd.recommendedInSize();   // 128 KB
+const out_size = zstd.recommendedOutSize();  // 128 KB + 6
+const d_in = zstd.recommendedDecompressInSize();       // 128 KB
+const d_out = zstd.recommendedDecompressOutSize();     // 128 KB
 ```
 
 ## EndDirective

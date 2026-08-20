@@ -124,10 +124,10 @@ pub const trainFromSamples = dict_mod.trainFromSamples;
 pub const finalizeDictionary = dict_mod.finalizeDictionary;
 
 // ── Streaming convenience functions ──────────────────────────────
-pub const recommendedCInSize = streaming_mod.recommendedCInSize;
-pub const recommendedCOutSize = streaming_mod.recommendedCOutSize;
-pub const recommendedDInSize = streaming_mod.recommendedDInSize;
-pub const recommendedDOutSize = streaming_mod.recommendedDOutSize;
+pub const recommendedInSize = streaming_mod.recommendedInSize;
+pub const recommendedOutSize = streaming_mod.recommendedOutSize;
+pub const recommendedDecompressInSize = streaming_mod.recommendedDecompressInSize;
+pub const recommendedDecompressOutSize = streaming_mod.recommendedDecompressOutSize;
 
 // ── CParameter bounds ────────────────────────────────────────────
 pub const cParamGetBounds = compress_mod.cParamGetBounds;

@@ -99,6 +99,6 @@ pub const StreamCompressOptions = struct {
 ## Recommended Sizes
 
 ```zig
-const in_size = zstd.recommendedCInSize();   // 128 KB
-const out_size = zstd.recommendedCOutSize();  // 128 KB + 6
+const in_size = zstd.recommendedInSize();   // 128 KB
+const out_size = zstd.recommendedOutSize();  // 128 KB + 6
 ```

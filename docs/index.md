@@ -6,7 +6,7 @@ titleTemplate: Native Zig Compression Library
 hero:
   name: zstd.zig
   text: Native Zig Compression Library
-  tagline: "A complete native Zig implementation of Zstandard compression. No C bindings, no dependencies. Supports compression, decompression, streaming, and dictionary-based operations for Zig 0.17.0+ (dev builds)."
+  tagline: "A complete native Zig implementation of Zstandard compression. No C bindings, no dependencies. Supports compression, decompression, streaming, and dictionary-based operations for Zig 0.16.0+."
   actions:
     - theme: brand
       text: Get Started

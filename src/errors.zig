@@ -113,8 +113,8 @@ pub fn isError(result: usize) bool {
 pub fn getErrorCode(result: usize) ErrorCode {
     if (!isError(result)) return .no_error;
     const val: c_int = @intCast(@as(isize, @bitCast(result)));
-    const code: ErrorCode = @fromBackingInt(@intCast(val));
-    return if (@backingInt(code) > @backingInt(ErrorCode.max_code)) .generic else code;
+    const code: ErrorCode = @enumFromInt(@as(c_int, @intCast(val)));
+    return if (@intFromEnum(code) > @intFromEnum(ErrorCode.max_code)) .generic else code;
 }
 
 pub fn errorCodeToError(code: ErrorCode) ZstdError {
@@ -200,7 +200,7 @@ pub fn errorName(code: ErrorCode) []const u8 {
 }
 
 test "error conversion" {
-    const err = errorCodeToError(@fromBackingInt(@intCast(1)));
+    const err = errorCodeToError(@enumFromInt(@as(c_int, 1)));
     try std.testing.expectEqual(ZstdError.Generic, err);
 }
 

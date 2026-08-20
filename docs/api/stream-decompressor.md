@@ -59,6 +59,6 @@ pub const StreamDecompressOptions = struct {
 ## Recommended Sizes
 
 ```zig
-const in_size = zstd.recommendedDInSize();   // 128 KB
-const out_size = zstd.recommendedDOutSize();  // 128 KB
+const in_size = zstd.recommendedDecompressInSize();   // 128 KB
+const out_size = zstd.recommendedDecompressOutSize();  // 128 KB
 ```

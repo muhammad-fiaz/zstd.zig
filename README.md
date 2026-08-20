@@ -1,7 +1,7 @@
 <div align="center">
 
 <a href="https://muhammad-fiaz.github.io/zstd.zig/"><img src="https://img.shields.io/badge/docs-muhammad--fiaz.github.io-blue" alt="Documentation"></a>
-<a href="https://ziglang.org/"><img src="https://img.shields.io/badge/Zig-0.17.0--dev-orange.svg?logo=zig" alt="Zig Version"></a>
+<a href="https://ziglang.org/"><img src="https://img.shields.io/badge/Zig-0.16.0-orange.svg?logo=zig" alt="Zig Version"></a>
 <a href="https://github.com/muhammad-fiaz/zstd.zig"><img src="https://img.shields.io/github/stars/muhammad-fiaz/zstd.zig" alt="GitHub stars"></a>
 <a href="https://github.com/muhammad-fiaz/zstd.zig/issues"><img src="https://img.shields.io/github/issues/muhammad-fiaz/zstd.zig" alt="GitHub issues"></a>
 <a href="https://github.com/muhammad-fiaz/zstd.zig/pulls"><img src="https://img.shields.io/github/issues-pr/muhammad-fiaz/zstd.zig" alt="GitHub pull requests"></a>
@@ -90,17 +90,15 @@ Before using `zstd.zig`, ensure you have the following:
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| **Zig** | **0.17.0** (development) | Install via `scoop install versions/zig-dev` or download from [ziglang.org](https://ziglang.org/download/) |
+| **Zig** | **0.16.0** or later | Download from [ziglang.org](https://ziglang.org/download/) |
 | **Operating System** | Windows 10+, Linux, macOS, FreeBSD | Cross-platform support |
 
 > [!IMPORTANT]
-> **Zig 0.17.0 is required.** This project targets Zig 0.17.0 (development version). The native Zig implementation requires 0.17.0+ features. Install the development version via:
+> **Zig 0.16.0 or later is required.** This project targets Zig 0.16.0 (stable). Install via:
 > ```bash
-> # Using Scoop (Windows)
-> scoop bucket add versions
-> scoop install versions/zig-dev
->
-> # Or download from https://ziglang.org/download/
+> # Download from https://ziglang.org/download/
+> # Or using Scoop (Windows)
+> scoop install zig
 > ```
 
 ---
@@ -242,7 +240,7 @@ defer allocator.free(c2);
 var comp = zstd.StreamCompressor.init(allocator, .{ .level = .default });
 defer comp.deinit();
 
-var output: [zstd.recommendedCOutSize()]u8 = undefined;
+var output: [zstd.recommendedOutSize()]u8 = undefined;
 
 const r1 = try comp.compressChunk(chunk1, &output, .@"continue");
 const r2 = try comp.compressChunk(chunk2, &output, .@"continue");
@@ -255,7 +253,7 @@ const final = try comp.endStream(&output);
 var sd = zstd.StreamDecompressor.init(allocator, .{});
 defer sd.deinit();
 
-var output: [zstd.recommendedDOutSize()]u8 = undefined;
+var output: [zstd.recommendedDecompressOutSize()]u8 = undefined;
 const result = try sd.decompressChunk(compressed_data, &output);
 const text = output[0..result.bytes_written];
 ```
@@ -400,7 +398,6 @@ zig build run-streaming-decompress
 ```bash
 zig build            # Build library
 zig build test       # Run all tests (35+)
-zig build fmt        # Format source files
 zig build docs       # Generate documentation site
 ```
 

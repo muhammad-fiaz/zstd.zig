@@ -14,19 +14,18 @@ Thank you for your interest in contributing to zstd.zig!
 
 ### Prerequisites
 
-* Zig 0.17.0 (development version) or later
+* Zig 0.16.0 or later
 * Git
 
-### Installing Zig 0.17.0
+### Installing Zig 0.16.0
 
-Since 0.17.0 is in development, install the dev version:
+Download from [ziglang.org](https://ziglang.org/download/) or use a package manager:
 
 ```bash
 # Using Scoop (Windows)
-scoop bucket add versions
-scoop install versions/zig-dev
+scoop install zig
 
-# Or download from https://ziglang.org/download/
+# Or download directly from https://ziglang.org/download/
 ```
 
 ### Building
@@ -34,7 +33,6 @@ scoop install versions/zig-dev
 ```bash
 zig build            # Build library
 zig build test       # Run all tests (35+)
-zig build fmt        # Check code formatting
 zig build docs       # Build documentation site
 ```
 
@@ -115,7 +113,6 @@ All changes must pass the test suite:
 
 ```bash
 zig build test
-zig build fmt
 ```
 
 Tests should:
