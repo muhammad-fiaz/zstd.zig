@@ -5,91 +5,134 @@ description: Streaming compression and decompression examples.
 
 # Streaming Examples
 
+These examples mirror `examples/streaming_compression.zig` and `examples/streaming_decompression.zig`. The current API uses `StreamingCompressor` / `StreamingDecompressor` (aliases `CStream` / `DStream`) with `compressStream` / `decompressStream`.
+
 ## Streaming Compression
 
 ```zig
 const std = @import("std");
 const zstd = @import("zstd");
 
-pub fn compressFile(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
-    var comp = zstd.StreamCompressor.init(allocator, .{
-        .level = .default,
-    });
-    defer comp.deinit();
-
-    var output: [zstd.recommendedOutSize()]u8 = undefined;
-    var result = std.ArrayList(u8).empty;
-    defer result.deinit(allocator);
-
-    // Process input in chunks
-    var pos: usize = 0;
-    while (pos < input.len) {
-        const end = @min(pos + zstd.recommendedInSize(), input.len);
-        const chunk = input[pos..end];
-
-        const r = try comp.compressChunk(chunk, &output, .@"continue");
-        if (r.bytes_written > 0) {
-            try result.appendSlice(allocator, output[0..r.bytes_written]);
-        }
-        pos = end;
+pub fn main() !void {
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    var cstream = try zstd.StreamingCompressor.init(allocator, 3);
+    defer cstream.deinit();
+    var out_buf: [1 << 16]u8 = undefined;
+    var total: usize = 0;
+    const chunks = [_][]const u8{ "Streaming ", "compression ", "processes ", "data incrementally ", "without buffering all at once. " };
+    for (chunks, 0..) |chunk, i| {
+        const is_last = i == chunks.len - 1;
+        const directive: zstd.EndDirective = if (is_last) .end else .flush;
+        const res = try cstream.compressStream(out_buf[total..], chunk, directive);
+        // res = { in_consumed: usize, out_produced: usize, remaining: usize }
+        std.debug.assert(res.in_consumed == chunk.len);
+        total += res.out_produced;
     }
-
-    // Finalize
-    const final = try comp.endStream(&output);
-    if (final.bytes_written > 0) {
-        try result.appendSlice(allocator, output[0..final.bytes_written]);
-    }
-
-    return result.toOwnedSlice(allocator);
+    const decompressed = try zstd.decompress(allocator, out_buf[0..total]);
+    defer allocator.free(decompressed);
 }
+```
+
+Key points:
+
+- `StreamingCompressor.init(allocator, level i32)!` or `initWithOptions(allocator, CompressionOptions)`
+- `compressStream(out, in, directive: EndDirective)` where `EndDirective = enum{ cont, flush, end }`
+- Return struct is `{ in_consumed, out_produced, remaining }`
+
+```bash
+zig build run-streaming_compression
+```
+
+## With Options
+
+```zig
+var cstream = zstd.StreamingCompressor.initWithOptions(allocator, .{
+    .level = 9,
+    .checksum = true,
+    .window_log = 20,
+});
+defer cstream.deinit();
+cstream.setPledgedSrcSize(@as(?u64, expected_total));
+cstream.setChecksumFlag(true);
 ```
 
 ## Streaming Decompression
 
 ```zig
-pub fn decompressStream(allocator: std.mem.Allocator, compressed: []const u8) ![]u8 {
-    var decomp = zstd.StreamDecompressor.init(allocator, .{});
-    defer decomp.deinit();
+const original = "Streaming decompression handles partial input and output buffers with backpressure. " ** 10;
+const compressed = try zstd.compress(allocator, original);
+defer allocator.free(compressed);
 
-    var output: [zstd.recommendedDecompressOutSize()]u8 = undefined;
-    var result = std.ArrayList(u8).empty;
-    defer result.deinit(allocator);
+var dstream = zstd.StreamingDecompressor.init(allocator);
+defer dstream.deinit();
 
-    var pos: usize = 0;
-    while (pos < compressed.len) {
-        const end = @min(pos + zstd.recommendedDecompressInSize(), compressed.len);
-        const chunk = compressed[pos..end];
-
-        const r = try decomp.decompressChunk(chunk, &output);
-        if (r.bytes_written > 0) {
-            try result.appendSlice(allocator, output[0..r.bytes_written]);
-        }
-        pos = end;
-    }
-
-    return result.toOwnedSlice(allocator);
+var out: [1 << 16]u8 = undefined;
+var out_pos: usize = 0;
+var in_pos: usize = 0;
+const chunk_size: usize = 64;
+while (in_pos < compressed.len) {
+    const chunk = compressed[in_pos..@min(in_pos + chunk_size, compressed.len)];
+    const res = try dstream.decompressStream(out[out_pos..], chunk);
+    // res = { in_consumed: usize, out_produced: usize, needs_more: bool }
+    in_pos += res.in_consumed;
+    out_pos += res.out_produced;
+    if (res.needs_more and in_pos >= compressed.len) break;
 }
+std.debug.assert(std.mem.eql(u8, original, out[0..out_pos]));
+
+// Alternative convenience
+var dstream2 = zstd.StreamingDecompressor.init(allocator);
+defer dstream2.deinit();
+var out2: [1 << 16]u8 = undefined;
+const n = try dstream2.decompressAll(&out2, compressed);
+```
+
+```bash
+zig build run-streaming_decompression
 ```
 
 ## Multi-Chunk Round Trip
 
 ```zig
 // Compress in chunks
-var comp = zstd.StreamCompressor.init(allocator, .{});
-defer comp.deinit();
+var cstream = try zstd.StreamingCompressor.init(allocator, 3);
+defer cstream.deinit();
 
-var c_buf: [zstd.recommendedOutSize()]u8 = undefined;
+var c_buf: [1 << 16]u8 = undefined;
+var c_pos: usize = 0;
+{
+    const r = try cstream.compressStream(c_buf[c_pos..], "Hello, ", .cont);
+    c_pos += r.out_produced;
+}
+{
+    const r = try cstream.compressStream(c_buf[c_pos..], "World!", .end);
+    c_pos += r.out_produced;
+}
 
-const r1 = try comp.compressChunk("Hello, ", &c_buf, .@"continue");
-const r2 = try comp.compressChunk("World!", &c_buf, .@"continue");
-const r3 = try comp.endStream(&c_buf);
+// Then decompress incrementally
+var dstream = zstd.StreamingDecompressor.init(allocator);
+defer dstream.deinit();
 
-// Collect compressed data...
-// Then decompress
-var decomp = zstd.StreamDecompressor.init(allocator, .{});
-defer decomp.deinit();
-
-var d_buf: [zstd.recommendedDecompressOutSize()]u8 = undefined;
-const d1 = try decomp.decompressChunk(compressed_chunk, &d_buf);
-std.debug.print("{s}\n", .{d_buf[0..d1.bytes_written]}); // "Hello, World!"
+var d_buf: [4096]u8 = undefined;
+var d_pos: usize = 0;
+var i: usize = 0;
+while (i < c_pos) {
+    const sz: usize = @min(8, c_pos - i);
+    const res = try dstream.decompressStream(d_buf[d_pos..], c_buf[i..i+sz]);
+    i += res.in_consumed;
+    d_pos += res.out_produced;
+}
+std.debug.print("{s}\n", .{d_buf[0..d_pos]}); // "Hello, World!"
 ```
+
+## Resetting Streams
+
+```zig
+cstream.reset(); // clear buffer, checksum, finished/header flags
+dstream.reset(); // clear in/out buffers, stage, frame_header
+// Ready for a new job without reallocating
+```
+
+> Removed names: old `StreamCompressor` / `StreamDecompressor`, `compressChunk` / `decompressChunk`, `endStream` / `flushStream`, `recommendedInSize/OutSize`, `setParameter`, `StreamCompressOptions { level = .default }`, and `EndDirective @"continue"` are replaced by the API above (`Streaming*`, `compressStream`, `decompressStream`, `.cont/.flush/.end`).

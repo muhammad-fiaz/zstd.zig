@@ -21,16 +21,21 @@ Add zstd.zig to your `build.zig.zon`:
 
 ```zig
 .zstd = .{
-    .url = "https://github.com/muhammad-fiaz/zstd.zig/archive/refs/heads/dev.tar.gz",
-    .hash = "...",  // use zig build to get the hash
+    .url = "https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.2.tar.gz",
+    .hash = "...",  // use zig fetch --save to get the hash
 },
 ```
 
 Then in your `build.zig`:
 
 ```zig
-const zstd = b.dependency("zstd", .{});
-exe.root_module.addImport("zstd", zstd.module("zstd"));
+const target = b.standardTargetOptions(.{});
+const optimize = b.standardOptimizeOption(.{});
+const zstd_dep = b.dependency("zstd", .{
+    .target = target,
+    .optimize = optimize,
+});
+exe.root_module.addImport("zstd", zstd_dep.module("zstd"));
 ```
 
 ## Basic Usage
@@ -42,16 +47,18 @@ const std = @import("std");
 const zstd = @import("zstd");
 
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
     const original = "Hello, zstd.zig! This text will be compressed.";
 
-    // Compress with default options
-    const compressed = try zstd.compress(allocator, original, .{});
+    // Compress with default level
+    const compressed = try zstd.compress(allocator, original);
     defer allocator.free(compressed);
 
     // Decompress
-    const decompressed = try zstd.decompress(allocator, compressed, .{});
+    const decompressed = try zstd.decompress(allocator, compressed);
     defer allocator.free(decompressed);
 
     std.debug.print("Original: {s}\n", .{original});
@@ -63,24 +70,21 @@ pub fn main() !void {
 ### With Compression Level
 
 ```zig
-// Use fastest compression
-const fast = try zstd.compress(allocator, data, .{ .level = .fastest });
+// Use fast compression (level 1)
+const fast = try zstd.compressWithLevel(allocator, data, 1);
 
-// Use best compression
-const best = try zstd.compress(allocator, data, .{ .level = .best });
+// Use best compression (level 19)
+const best = try zstd.compressWithLevel(allocator, data, 19);
 
-// Use a custom level (1-22)
-const custom = try zstd.compress(allocator, data, .{
-    .level = @enumFromInt(12),
-});
+// Use a custom level 12
+const custom = try zstd.compressWithLevel(allocator, data, 12);
 ```
 
-### With Checksum
+### With Options
 
 ```zig
-const compressed = try zstd.compress(allocator, data, .{
-    .checksum = true,
-});
+const opts = zstd.CompressionOptions{ .level = 9, .checksum = true, .window_log = 20 };
+const compressed = try zstd.compressWithOptions(allocator, data, opts);
 ```
 
 ## Reusable Contexts
@@ -88,15 +92,21 @@ const compressed = try zstd.compress(allocator, data, .{
 For repeated operations with the same settings:
 
 ```zig
-var comp = zstd.Compressor.init(.{ .level = .default });
-defer comp.deinit();
+var cctx = zstd.CompressionContext.init(allocator);
+defer cctx.deinit();
+
+var dctx = zstd.DecompressionContext.init(allocator);
+defer dctx.deinit();
 
 // Compress multiple buffers
-const c1 = try comp.compressAlloc(allocator, data1);
+const c1 = try cctx.compressAlloc(data1);
 defer allocator.free(c1);
 
-const c2 = try comp.compressAlloc(allocator, data2);
+const c2 = try cctx.compressAlloc(data2);
 defer allocator.free(c2);
+
+const d1 = try dctx.decompressAlloc(c1);
+defer allocator.free(d1);
 ```
 
 ## What's Next

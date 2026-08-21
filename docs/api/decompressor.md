@@ -1,17 +1,19 @@
 ---
-title: Decompressor
+title: DecompressionContext
 description: Reusable decompression context.
 ---
 
-# Decompressor
+# DecompressionContext
 
-A reusable decompression context for decompressing multiple buffers.
+A reusable decompression context for decompressing multiple buffers. Defined in `src/decompress/context.zig:6` and re-exported as `zstd.DecompressionContext` (`src/zstd.zig:24`).
 
 ## Definition
 
 ```zig
-pub const Decompressor = struct {
+pub const DecompressionContext = struct {
     allocator: std.mem.Allocator,
+    stream: StreamingDecompressor,
+    max_window_size: usize, // default 1<<27
     // ...
 };
 ```
@@ -20,48 +22,87 @@ pub const Decompressor = struct {
 
 ### `init`
 
-Create a new decompressor.
+Create a new decompressor (no options struct):
 
 ```zig
-pub fn init(allocator: std.mem.Allocator, opts: DecompressOptions) Decompressor
+pub fn init(allocator: std.mem.Allocator) DecompressionContext
 ```
 
 ```zig
-var decomp = zstd.Decompressor.init(allocator, .{});
-defer decomp.deinit();
+var dctx = zstd.DecompressionContext.init(allocator);
+defer dctx.deinit();
 ```
 
 ### `deinit`
 
-Release resources.
+Release streaming buffers:
 
 ```zig
-pub fn deinit(self: *Decompressor) void
+pub fn deinit(self: *DecompressionContext) void
 ```
 
 ### `decompress`
 
-Decompress data.
+Decompress into preallocated buffer:
 
 ```zig
-pub fn decompress(self: *Decompressor, src: []const u8) ZstdError![]u8
+pub fn decompress(self: *DecompressionContext, dst: []u8, src: []const u8) !usize
 ```
 
 ```zig
-const decompressed = try decomp.decompress(compressed);
+var out: [4096]u8 = undefined;
+const n = try dctx.decompress(&out, compressed);
+```
+
+### `decompressAlloc`
+
+Decompress with allocator:
+
+```zig
+pub fn decompressAlloc(self: *DecompressionContext, src: []const u8) anyerror![]u8
+```
+
+```zig
+const decompressed = try dctx.decompressAlloc(compressed);
 defer allocator.free(decompressed);
+```
+
+### `setMaxWindowSize`
+
+Set window size limit:
+
+```zig
+pub fn setMaxWindowSize(self: *DecompressionContext, size: usize) void
+```
+
+```zig
+dctx.setMaxWindowSize(1 << 27);
+```
+
+### `reset`
+
+Reset internal stream state:
+
+```zig
+pub fn reset(self: *DecompressionContext) void
 ```
 
 ## Example
 
 ```zig
-var decomp = zstd.Decompressor.init(allocator, .{});
-defer decomp.deinit();
+var dctx = zstd.DecompressionContext.init(allocator);
+defer dctx.deinit();
+
+dctx.setMaxWindowSize(1 << 26);
 
 // Decompress multiple buffers
-const d1 = try decomp.decompress(c1);
+const d1 = try dctx.decompressAlloc(c1);
 defer allocator.free(d1);
 
-const d2 = try decomp.decompress(c2);
-defer allocator.free(d2);
+var buf: [4096]u8 = undefined;
+const n = try dctx.decompress(&buf, c2);
+
+dctx.reset();
 ```
+
+> Removed names: old `Decompressor`, `Decompressor.init(allocator, opts)`, `decompress(src)` returning owned slice without `decompressAlloc`, and per-call `DecompressOptions` are replaced by `DecompressionContext` above.

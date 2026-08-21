@@ -7,97 +7,136 @@ description: Use dictionary compression for better ratios on similar data.
 
 Dictionary compression achieves significantly better compression ratios when compressing many similar small buffers (e.g., database records, JSON objects, log entries).
 
-## CDict (Compression Dictionary)
+## Dictionary Type
+
+`Dictionary` is defined in `src/dictionary/dictionary.zig:5`:
+
+```zig
+pub const Dictionary = struct {
+    data: []u8, // includes 8-byte header (magic + dict_id)
+    dict_id: u32,
+    allocator: std.mem.Allocator,
+
+    pub fn deinit(self: *Dictionary) void
+    pub fn dictId(self: *const Dictionary) u32
+    pub fn content(self: *const Dictionary) []const u8 // raw content without header
+};
+```
+
+Top-level helpers in `src/zstd.zig:52-53`:
+
+```zig
+pub fn loadDictionary(allocator: std.mem.Allocator, data: []const u8) ZstdError!Dictionary
+pub fn createDictionaryFromData(allocator: std.mem.Allocator, data: []const u8, dict_id: u32) ZstdError!Dictionary
+```
 
 ```zig
 const zstd = @import("zstd");
 
-// Create a CDict from dictionary data
-var cdict = zstd.CDict.init(dict_data, 3);
-defer cdict.deinit();
+// Create a dictionary from raw bytes with an explicit ID
+var dict = try zstd.createDictionaryFromData(allocator, raw_bytes, 12345);
+defer dict.deinit();
+std.debug.print("ID={d} size={d}\n", .{ dict.dictId(), dict.data.len });
+std.debug.print("content len={d}\n", .{ dict.content().len });
 
-// Compress using the dictionary
-const compressed = try cdict.compress(allocator, data);
-defer allocator.free(compressed);
+// Load an existing dictionary blob (preserves its stored dict_id)
+var loaded = try zstd.loadDictionary(allocator, dict.data);
+defer loaded.deinit();
+std.debug.assert(loaded.dictId() == dict.dictId());
 ```
 
-## DDict (Decompression Dictionary)
+### Compressing with a Dictionary ID
+
+Dictionary-aware compression currently stores the `dict_id` in the frame header via `CompressionOptions`:
 
 ```zig
-var ddict = zstd.DDict.init(dict_data);
-defer ddict.deinit();
+const opts = zstd.CompressionOptions{ .dict_id = dict.dictId() };
+const compressed = try zstd.compressWithOptions(allocator, data, opts);
+defer allocator.free(compressed);
 
-// Decompress using the dictionary
-const decompressed = try ddict.decompress(allocator, compressed);
+// Verify via header
+const hdr = try zstd.getFrameHeader(compressed);
+std.debug.assert(hdr.dict_id == dict.dictId());
+
+const decompressed = try zstd.decompress(allocator, compressed);
 defer allocator.free(decompressed);
 ```
 
-## Dictionary Functions
+> Removed names: old `CDict`/`DDict`, `compressUsingDict`, `decompressUsingDict`, `getDictIDFromDict`, `getDictIDFromFrame`, `compressUsingCDict` no longer exist — use `Dictionary`, `loadDictionary`, `createDictionaryFromData`, and `CompressionOptions.dict_id` instead.
 
-### Compress with raw dictionary bytes
+## DictionaryBuilder
 
-```zig
-const compressed = try zstd.compressUsingDict(allocator, data, dict_bytes, 3);
-defer allocator.free(compressed);
-```
-
-### Decompress with raw dictionary bytes
+`DictionaryBuilder` is defined in `src/dictionary/builder.zig:51`:
 
 ```zig
-const decompressed = try zstd.decompressUsingDict(allocator, compressed, dict_bytes);
-defer allocator.free(decompressed);
+pub const DictBuilderParams = struct {
+    dict_size: usize = 112640,
+    dict_id: u32 = 0,
+    level: u32 = 3,
+};
+
+pub const DictionaryBuilder = struct {
+    pub fn init(allocator: std.mem.Allocator, params: DictBuilderParams) DictionaryBuilder
+    pub fn train(self: *DictionaryBuilder, samples: []const []const u8) anyerror!Dictionary
+    pub fn trainCover(self: *DictionaryBuilder, samples: []const []const u8, k: usize, d: usize) anyerror!Dictionary
+    pub fn trainFastCover(self: *DictionaryBuilder, samples: []const []const u8, k: usize, d: usize, f: u32, accel: u32) anyerror!Dictionary
+};
 ```
 
-### Get Dictionary ID
+Helper functions (same file):
 
 ```zig
-// From dictionary data
-const dict_id = zstd.getDictIDFromDict(dict_bytes);
-
-// From compressed frame
-const frame_dict_id = zstd.getDictIDFromFrame(compressed);
+pub fn trainFromSamples(allocator, samples, params) !Dictionary
+pub fn trainCoverImpl(allocator, samples, params, k, d) !Dictionary
+pub fn trainFastCoverImpl(allocator, samples, params, k, d, f, accel) !Dictionary
 ```
 
-## Training a Dictionary
-
-Train a dictionary from sample data:
+### Training a Dictionary
 
 ```zig
 const samples = &[_][]const u8{
     sample1, sample2, sample3, sample4, sample5,
 };
 
-// Get total buffer size
-var total: usize = 0;
-for (samples) |s| total += s.len;
+var builder = zstd.DictionaryBuilder.init(allocator, .{ .dict_size = 8192, .dict_id = 42 });
+var dict = try builder.train(samples);
+defer dict.deinit();
 
-// Create sizes array
-var sizes: [samples.len]usize = undefined;
-for (samples, 0..) |s, i| sizes[i] = s.len;
+// Cover variants (k = capacity, d = dict bits)
+var cdict = try builder.trainCover(samples, 6, 8);
+defer cdict.deinit();
 
-// Create samples buffer
-var buf = try allocator.alloc(u8, total);
-defer allocator.free(buf);
-var offset: usize = 0;
-for (samples) |s| {
-    @memcpy(buf[offset..][0..s.len], s);
-    offset += s.len;
-}
-
-// Train the dictionary (requires at least 3 samples)
-const dict = try zstd.trainFromSamples(buf, &sizes, 112640);
-defer allocator.free(dict);
+var fdict = try builder.trainFastCover(samples, 6, 8, 6, 2);
+defer fdict.deinit();
 ```
 
-## Finalize a Dictionary
+Training requires at least one non-empty sample; content is synthesized from the samples in the current implementation.
+
+### Full Example (mirrors `examples/dictionary_training.zig`)
 
 ```zig
-const written = try zstd.finalizeDictionary(
-    &dict_buffer,
-    max_dict_size,
-    dict_content,
-    samples_buffer,
-    &sample_sizes,
-    .{ .dict_id = 0 },
-);
+var samples: std.ArrayList([]const u8) = .empty;
+defer samples.deinit(allocator);
+for (0..100) |i| {
+    const s = try std.fmt.allocPrint(allocator, "sample {d}: common header payload {d}", .{ i, i % 10 });
+    try samples.append(allocator, s);
+}
+defer for (samples.items) |s| allocator.free(s);
+
+var builder = zstd.DictionaryBuilder.init(allocator, .{ .dict_size = 8192 });
+var d = try builder.train(samples.items);
+defer d.deinit();
+
+var cd = try builder.trainCover(samples.items, 6, 8);
+defer cd.deinit();
+
+var fd = try builder.trainFastCover(samples.items, 6, 8, 6, 2);
+defer fd.deinit();
+```
+
+## Running the Dictionary Examples
+
+```bash
+zig build run-dictionary_compression
+zig build run-dictionary_training
 ```

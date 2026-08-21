@@ -22,15 +22,15 @@ features:
   - title: Pure Zig Implementation
     details: "Complete native Zig reimplementation of Zstandard. No C bindings, no external dependencies. Every byte is Zig."
   - title: One-Shot Compression
-    details: "Simple compress and decompress functions with options structs. Pass .{ .level = .fastest } or .{ .level = .best } for quick control."
+    details: "Simple compress and decompress functions. Use compressWithLevel for numeric levels 1-22 or compressWithOptions for fine control."
   - title: Reusable Contexts
-    details: "Compressor and Decompressor types that can be initialized once and reused across multiple operations. Set parameters, reset, and compress again."
+    details: "CompressionContext and DecompressionContext types that can be initialized once and reused across multiple operations. Set parameters, reset, and compress again."
   - title: Streaming Support
-    details: "StreamCompressor and StreamDecompressor for chunk-based processing. Handle data that doesn't fit in memory with incremental compression."
+    details: "StreamingCompressor and StreamingDecompressor for chunk-based processing. Handle data that doesn't fit in memory with incremental compression via EndDirective."
   - title: Dictionary Compression
-    details: "CDict and DDict types for dictionary-based compression. Train dictionaries from samples, achieve better ratios on similar data."
+    details: "Dictionary and DictionaryBuilder types for dictionary-based compression. Train dictionaries from samples via train, trainCover, trainFastCover."
   - title: Frame Inspection
-    details: "Frame namespace for inspecting zstd frames: check magic number, content size, compressed size, and dictionary ID without decompressing."
+    details: "Frame inspection via isFrame, getFrameHeader, getFrameContentSize, findFrameCompressedSize and isSkippableFrame without decompressing."
   - title: Cross-Platform
     details: "Works on Linux, Windows, macOS, and FreeBSD. Supports both 32-bit and 64-bit architectures including aarch64."
   - title: Idiomatic Zig API

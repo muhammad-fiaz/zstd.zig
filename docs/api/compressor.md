@@ -1,21 +1,19 @@
 ---
-title: Compressor
+title: CompressionContext
 description: Reusable compression context with parameter control.
 ---
 
-# Compressor
+# CompressionContext
 
-A reusable compression context. Create once, compress multiple buffers with the same settings.
+A reusable compression context. Create once, compress multiple buffers with the same settings. Defined in `src/compress/context.zig:6` and re-exported as `zstd.CompressionContext` (`src/zstd.zig:23`).
 
 ## Definition
 
 ```zig
-pub const Compressor = struct {
-    level: i32,
-    checksum: bool,
-    dict_id: u32,
-    use_dict_id: bool,
-    pledged_src_size: ?u64,
+pub const CompressionContext = struct {
+    allocator: std.mem.Allocator,
+    options: CompressionOptions,
+    stream: StreamingCompressor,
     // ...
 };
 ```
@@ -24,100 +22,136 @@ pub const Compressor = struct {
 
 ### `init`
 
-Create a new compressor.
+Create with default level (`3`):
 
 ```zig
-pub fn init(opts: CompressOptions) Compressor
+pub fn init(allocator: std.mem.Allocator) CompressionContext
 ```
 
 ```zig
-var comp = zstd.Compressor.init(.{ .level = .fastest });
-defer comp.deinit();
+var cctx = zstd.CompressionContext.init(allocator);
+defer cctx.deinit();
+```
+
+### `initWithLevel`
+
+Create with numeric `i32` level:
+
+```zig
+pub fn initWithLevel(allocator: std.mem.Allocator, level: i32) CompressionContext
+```
+
+```zig
+var cctx = zstd.CompressionContext.initWithLevel(allocator, 9);
+defer cctx.deinit();
 ```
 
 ### `deinit`
 
-Release resources.
+Release streaming buffer:
 
 ```zig
-pub fn deinit(self: *Compressor) void
+pub fn deinit(self: *CompressionContext) void
 ```
 
-### `compressAlloc`
+### `setLevel`
 
-Compress with allocator (convenience method).
-
-```zig
-pub fn compressAlloc(self: *Compressor, allocator: std.mem.Allocator, src: []const u8) ZstdError![]u8
-```
+Change compression level:
 
 ```zig
-const compressed = try comp.compressAlloc(allocator, data);
-defer allocator.free(compressed);
-```
-
-### `compress2`
-
-Compress into a pre-allocated buffer.
-
-```zig
-pub fn compress2(self: *Compressor, dst: []u8, src: []const u8) ZstdError!usize
+pub fn setLevel(self: *CompressionContext, level: i32) void
 ```
 
 ```zig
-var buf: [4096]u8 = undefined;
-const written = try comp.compress2(&buf, data);
+cctx.setLevel(5);
 ```
 
-### `setParameter`
+### `setChecksum`
 
-Change a compression parameter.
+Enable/disable checksum:
 
 ```zig
-pub fn setParameter(self: *Compressor, param: CParameter, value: i32) ZstdError!void
+pub fn setChecksum(self: *CompressionContext, flag: bool) void
 ```
 
-```zig
-try comp.setParameter(.compression_level, 5);
-try comp.setParameter(.checksum_flag, 1);
-```
+### `setWindowLog`
 
-### `reset`
-
-Reset the compressor state.
+Set window log override:
 
 ```zig
-pub fn reset(self: *Compressor, directive: ResetDirective) ZstdError!void
-```
-
-```zig
-// Reset parameters only
-try comp.reset(.parameters);
-
-// Reset everything
-try comp.reset(.session_and_parameters);
+pub fn setWindowLog(self: *CompressionContext, log: u8) void
 ```
 
 ### `setPledgedSrcSize`
 
-Set the content size for the frame header.
+Set content size for frame header:
 
 ```zig
-pub fn setPledgedSrcSize(self: *Compressor, src_size: u64) ZstdError!void
+pub fn setPledgedSrcSize(self: *CompressionContext, size: ?u64) void
+```
+
+```zig
+cctx.setPledgedSrcSize(@as(?u64, data.len));
+cctx.setPledgedSrcSize(null); // unknown
+```
+
+### `compress`
+
+Compress into pre-allocated buffer:
+
+```zig
+pub fn compress(self: *CompressionContext, dst: []u8, src: []const u8) !usize
+```
+
+```zig
+var buf: [4096]u8 = undefined;
+const written = try cctx.compress(&buf, data);
+```
+
+### `compressAlloc`
+
+Compress with allocator (convenience):
+
+```zig
+pub fn compressAlloc(self: *CompressionContext, src: []const u8) anyerror![]u8
+```
+
+```zig
+const compressed = try cctx.compressAlloc(data);
+defer allocator.free(compressed);
+```
+
+### `reset`
+
+Reset streaming state for reuse:
+
+```zig
+pub fn reset(self: *CompressionContext) void
+```
+
+```zig
+cctx.reset();
 ```
 
 ## Example
 
 ```zig
-var comp = zstd.Compressor.init(.{ .level = .default });
-defer comp.deinit();
+var cctx = zstd.CompressionContext.init(allocator);
+defer cctx.deinit();
 
-// First compression
-const c1 = try comp.compressAlloc(allocator, data1);
+// First compression (default 3)
+const c1 = try cctx.compressAlloc(data1);
 defer allocator.free(c1);
 
 // Change level and compress again
-try comp.setParameter(.compression_level, 9);
-const c2 = try comp.compressAlloc(allocator, data2);
+cctx.setLevel(9);
+cctx.setChecksum(true);
+const c2 = try cctx.compressAlloc(data2);
 defer allocator.free(c2);
+
+// Into fixed buffer
+var buf: [8192]u8 = undefined;
+const n = try cctx.compress(&buf, data3);
 ```
+
+> Removed names: old `Compressor`, `Compressor.init(opts: CompressOptions)`, `compressAlloc(alloc,src)`, `compress2(dst,src)`, `setParameter(.compression_level, .checksum_flag)`, `reset(ResetDirective)` are replaced by the `CompressionContext` API above.

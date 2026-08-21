@@ -37,8 +37,8 @@
 > - **Huffman coding** for literal compression and decompression
 > - **FSE (Finite State Entropy)** table construction and decoding for sequence compression
 > - **LZ77** back-reference matching for sliding window compression
-> - **Dictionary support** with CDict/DDict for trained dictionaries and dictionary-based compression
-> - **Streaming API** with StreamCompressor/StreamDecompressor for chunked data processing
+> - **Dictionary support** with Dictionary and DictionaryBuilder for trained dictionaries
+> - **Streaming API** with StreamingCompressor/StreamingDecompressor for chunked data processing
 > - **Parameter API** for fine-tuning compression level, window size, hash tables, and strategies
 > - **Frame inspection** for metadata extraction without full decompression
 
@@ -49,31 +49,27 @@
 
 | Feature | Description |
 |---------|-------------|
-| **One-shot Compression** | `zstd.compress()` for single-call compression with configurable options |
+| **One-shot Compression** | `zstd.compress()` for single-call compression with default options |
 | **One-shot Decompression** | `zstd.decompress()` for single-call decompression with safety limits |
-| **Compression Levels** | Named levels (`.fastest`, `.default`, `.best`) and raw numeric levels (1-22) |
-| **Reusable Compressor** | `Compressor` struct for efficient multi-call compression with state |
-| **Reusable Decompressor** | `Decompressor` struct for efficient multi-call decompression with configurable limits |
-| **Streaming Compression** | `StreamCompressor` for chunked data with `compressChunk()` and `endStream()` |
-| **Streaming Decompression** | `StreamDecompressor` for chunked data with `decompressChunk()` |
-| **Dictionary Compression** | `CDict`/`DDict` for trained dictionaries with `compress()`/`decompress()` methods |
-| **Dictionary Training** | `trainFromSamples()` and `finalizeDictionary()` for creating custom dictionaries |
-| **Frame Inspection** | `Frame.isFrame()`, `Frame.inspect()`, `Frame.contentSize()` for metadata extraction |
-| **Parameter Bounds** | `cParamGetBounds()` and `dParamGetBounds()` for querying parameter ranges |
-| **CParameter API** | Compression parameters: window_log, hash_log, chain_log, search_log, min_match, strategy |
-| **DParameter API** | Decompression parameters: window_log_max |
+| **Compression Levels** | Numeric levels 1-22 via `zstd.compressWithLevel()` and `zstd.getCompressionParameters()` |
+| **Reusable Compressor** | `CompressionContext` for efficient multi-call compression with state |
+| **Reusable Decompressor** | `DecompressionContext` for efficient multi-call decompression with configurable limits |
+| **Streaming Compression** | `StreamingCompressor` for chunked data with `compressStream()` and `EndDirective` |
+| **Streaming Decompression** | `StreamingDecompressor` for chunked data with `decompressStream()` |
+| **Dictionary Compression** | `Dictionary` and `DictionaryBuilder` for trained dictionaries |
+| **Dictionary Training** | `DictionaryBuilder.train()`, `trainCover()`, `trainFastCover()` for creating custom dictionaries |
+| **Frame Inspection** | `isFrame()`, `getFrameHeader()`, `getFrameContentSize()`, `findFrameCompressedSize()` for metadata extraction |
+| **Parameter API** | `CompressionOptions` and `Strategy` for window_log, hash_log, chain_log, search_log, target_length |
 | **Checksum Support** | Optional XXH64 checksum in frame headers for data integrity verification |
-| **Reserved Bit Rejection** | Strict validation of reserved bits in frame headers and block types |
 | **Content Size Validation** | Validates content size on decompression against expected size |
 | **Window Size Limits** | Configurable `max_window_size` for decompression safety |
-| **Output Size Limits** | Configurable `max_output_size` to prevent unbounded allocation |
 | **Multi-frame Decompression** | Decompress multiple concatenated zstd frames in sequence |
-| **Skippable Frame Support** | Skip non-data frames during decompression |
+| **Skippable Frame Support** | Skip non-data frames during decompression via `isSkippableFrame()` |
 | **Cross-platform** | Linux, Windows, macOS with x86_64, aarch64, x86 support |
 | **Zero Dependencies** | Pure Zig implementation — no C libraries, no system dependencies |
 | **Strategy Selection** | Fast, DFast, Greedy, Lazy, Lazy2, BTLazy2, BTOpt, BTUltra strategies |
 | **Compression Bound** | `compressBound()` for pre-allocating output buffers |
-| **Backward Compatible** | Legacy function aliases available alongside modern API |
+| **Legacy Support** | Transparent handling of legacy frame versions v01-v07 |
 
 </details>
 
@@ -90,7 +86,7 @@ Before using `zstd.zig`, ensure you have the following:
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| **Zig** | **0.16.0** (recommended) | Download from [ziglang.org](https://ziglang.org/download/) |
+| **Zig** | **0.16.0** (required) | Download from [ziglang.org](https://ziglang.org/download/) |
 | **Operating System** | Windows 10+, Linux, macOS | Cross-platform support |
 
 ---
@@ -101,9 +97,9 @@ Before using `zstd.zig`, ensure you have the following:
 
 | Platform | x86_64 (64-bit) | aarch64 (ARM64) | x86 (32-bit) |
 |----------|-----------------|-----------------|--------------|
-| **Linux** | Yes | Yes | Yes |
+| **Linux** | Yes | Yes (via QEMU) | Yes |
 | **Windows** | Yes | Yes | Yes |
-| **macOS** | Yes | Yes (Apple Silicon) | No |
+| **macOS** | Yes (via aarch64 runner) | Yes (Apple Silicon) | No |
 
 ### Cross-Compilation
 
@@ -121,6 +117,9 @@ zig build -Dtarget=aarch64-macos
 
 # Build for 32-bit Windows
 zig build -Dtarget=x86-windows
+
+# Run tests with emulation for cross targets
+zig build test -Dtarget=aarch64-linux --summary all -fqemu
 ```
 
 </details>
@@ -142,7 +141,7 @@ zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0
 Use the latest development version from the `dev` branch.
 
 ```bash
-zig fetch --save git+https://github.com/muhammad-fiaz/zstd.zig.git
+zig fetch --save git+https://github.com/muhammad-fiaz/zstd.zig.git#dev
 ```
 
 ### Method 3: Manual `build.zig.zon` Configuration
@@ -183,6 +182,9 @@ To use a local checkout from another project, add a path dependency to your `bui
 After adding the dependency, import the module in your `build.zig`:
 
 ```zig
+const target = b.standardTargetOptions(.{});
+const optimize = b.standardOptimizeOption(.{});
+
 const zstd_dep = b.dependency("zstd", .{
     .target = target,
     .optimize = optimize,
@@ -198,11 +200,11 @@ exe.root_module.addImport("zstd", zstd_dep.module("zstd"));
 const zstd = @import("zstd");
 
 // Compress — simplest possible usage
-const compressed = try zstd.compress(allocator, data, .{});
+const compressed = try zstd.compress(allocator, data);
 defer allocator.free(compressed);
 
 // Decompress
-const decompressed = try zstd.decompress(allocator, compressed, .{});
+const decompressed = try zstd.decompress(allocator, compressed);
 defer allocator.free(decompressed);
 ```
 
@@ -213,18 +215,22 @@ const std = @import("std");
 const zstd = @import("zstd");
 
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-    // Create compressor
-    var comp = zstd.Compressor.init(.{ .level = .default });
-    defer comp.deinit();
+    // Create reusable contexts
+    var cctx = zstd.CompressionContext.init(allocator);
+    defer cctx.deinit();
+    var dctx = zstd.DecompressionContext.init(allocator);
+    defer dctx.deinit();
 
-    // Compress data
-    const compressed = try comp.compressAlloc(allocator, "Hello, zstd.zig!");
+    // Compress with context
+    const compressed = try cctx.compressAlloc("Hello, zstd.zig!");
     defer allocator.free(compressed);
 
-    // Decompress
-    const decompressed = try zstd.decompress(allocator, compressed, .{});
+    // Decompress with context
+    const decompressed = try dctx.decompressAlloc(compressed);
     defer allocator.free(decompressed);
 
     std.debug.print("Decompressed: {s}\n", .{decompressed});
@@ -237,13 +243,23 @@ Every method is available as a top-level function for convenience.
 
 ```zig
 // Compression
-const compressed = try zstd.compress(alloc, data, .{});
-const decompressed = try zstd.decompress(alloc, compressed, .{});
+const compressed = try zstd.compress(allocator, data);
+const withLevel = try zstd.compressWithLevel(allocator, data, 3);
+const withOpts = try zstd.compressWithOptions(allocator, data, .{ .level = 9, .checksum = true });
+const bound = zstd.compressBound(data.len);
+
+// Decompression
+const decompressed = try zstd.decompress(allocator, compressed);
 
 // Frame detection
 const is_valid = zstd.isFrame(data);
 const content = zstd.getFrameContentSize(data);
 const size = try zstd.findFrameCompressedSize(data);
+const header = try zstd.getFrameHeader(data);
+
+// Skippable frame
+const is_skip = zstd.isSkippableFrame(data);
+const n = zstd.writeSkippableFrame(&buf, "meta", 1);
 
 // Version
 const ver = zstd.versionNumber();
@@ -256,44 +272,51 @@ const def = zstd.defaultCLevel();
 ### Streaming
 
 ```zig
-var comp = zstd.StreamCompressor.init(allocator, .{ .level = .default });
-defer comp.deinit();
+var cstream = try zstd.StreamingCompressor.init(allocator, 3);
+defer cstream.deinit();
+var out: [4096]u8 = undefined;
+const r1 = try cstream.compressStream(&out, chunk1, .cont);
+const r2 = try cstream.compressStream(&out[r1.out_produced..], chunk2, .flush);
+const final = try cstream.compressStream(&out[r1.out_produced + r2.out_produced ..], &[_]u8{}, .end);
 
-var output: [4096]u8 = undefined;
-
-const r1 = try comp.compressChunk(chunk1, &output, .@"continue");
-const r2 = try comp.compressChunk(chunk2, &output, .@"continue");
-const final = try comp.endStream(&output);
+var dstream = zstd.StreamingDecompressor.init(allocator);
+defer dstream.deinit();
+var decoded: [4096]u8 = undefined;
+const res = try dstream.decompressStream(&decoded, compressed);
 ```
 
 ### Frame Inspection
 
 ```zig
-if (zstd.Frame.isFrame(data)) {
-    const info = zstd.Frame.inspect(data);
-    if (info) |i| {
-        std.debug.print("Content size: {?}\n", .{i.content_size});
-        std.debug.print("Checksum: {}\n", .{i.checksum});
-    }
+if (zstd.isFrame(data)) {
+    const hdr = try zstd.getFrameHeader(data);
+    std.debug.print("Content size: {d}\n", .{hdr.content_size});
+    std.debug.print("Window size: {d}\n", .{hdr.window_size});
+    std.debug.print("Checksum: {}\n", .{hdr.checksum_flag});
+    std.debug.print("Dict ID: {d}\n", .{hdr.dict_id});
 }
 ```
 
 ### Dictionary Compression
 
 ```zig
-// Create dictionaries from samples
-var dict = try zstd.trainFromSamples(allocator, samples_buf, &sizes, 1024);
-defer allocator.free(dict);
+// Train dictionary from samples
+var builder = zstd.DictionaryBuilder.init(allocator, .{ .dict_size = 8192 });
+var dict = try builder.train(&[_][]const u8{ sample1, sample2, sample3 });
+defer dict.deinit();
 
-// Compress with dictionary
-var cdict = zstd.CDict.init(dict, 3);
+// Alternative: cover training
+var cdict = try builder.trainCover(samples, 6, 8);
 defer cdict.deinit();
-const compressed = try cdict.compress(allocator, data);
 
-// Decompress with dictionary
-var ddict = zstd.DDict.init(dict);
-defer ddict.deinit();
-const decompressed = try ddict.decompress(allocator, compressed);
+// Compress with dictionary ID
+const opts = zstd.CompressionOptions{ .dict_id = dict.dictId() };
+const compressed = try zstd.compressWithOptions(allocator, data, opts);
+defer allocator.free(compressed);
+
+// Load existing dictionary
+var loaded = try zstd.loadDictionary(allocator, dict_bytes);
+defer loaded.deinit();
 ```
 
 ## API Reference
@@ -302,73 +325,78 @@ const decompressed = try ddict.decompress(allocator, compressed);
 
 | Function | Description |
 |---|---|
-| `zstd.compress(alloc, src, opts)` | One-shot compression |
-| `zstd.decompress(alloc, src, opts)` | One-shot decompression |
+| `zstd.compress(alloc, src)` | One-shot compression with default level |
+| `zstd.decompress(alloc, src)` | One-shot decompression |
+| `zstd.compressWithLevel(alloc, src, level)` | Compress with numeric level 1-22 |
+| `zstd.compressWithOptions(alloc, src, opts)` | Compress with `CompressionOptions` |
+| `zstd.compressInto(dst, src, level)` | Compress into preallocated buffer |
+| `zstd.decompressInto(dst, src)` | Decompress into preallocated buffer |
 | `zstd.compressBound(src_size)` | Maximum compressed size for buffer allocation |
-| `zstd.trainFromSamples(alloc, buf, sizes, cap)` | Train dictionary from samples |
-| `zstd.finalizeDictionary(dst, max, content, samples, sizes, params)` | Create dictionary from content |
-| `zstd.compressUsingDict(alloc, src, dict, level)` | Compress with raw dictionary data |
-| `zstd.decompressUsingDict(alloc, src, dict)` | Decompress with raw dictionary data |
-| `zstd.cParamGetBounds(param)` | Query compression parameter bounds |
-| `zstd.dParamGetBounds(param)` | Query decompression parameter bounds |
+| `zstd.decompressBound(src)` | Estimated decompressed size |
+| `zstd.findFrameCompressedSize(src)` | Exact compressed frame size |
+| `zstd.getFrameContentSize(src)` | Content size from header or `CONTENTSIZE_UNKNOWN/ERROR` |
+| `zstd.getFrameHeader(src)` | Parse `FrameHeader` with window, dict, checksum metadata |
+| `zstd.isFrame(src)` | Check if data is a zstd frame |
+| `zstd.isSkippableFrame(src)` | Check if data is a skippable frame |
+| `zstd.writeSkippableFrame(dst, data, variant)` | Write skippable frame |
+| `zstd.readSkippableFrame(dst, src)` | Read skippable frame payload |
+| `zstd.loadDictionary(alloc, data)` | Load dictionary from bytes |
+| `zstd.createDictionaryFromData(alloc, data, id)` | Create dictionary with ID |
+| `zstd.getCompressionParameters(level, src_size, window_log)` | Get `CompressionOptions` for level |
 
 ### Types
 
 | Type | Description |
 |---|---|
-| `Compressor` | Reusable compression context with `compress2()` |
-| `Decompressor` | Reusable decompression context with configurable limits |
-| `StreamCompressor` | Streaming compression with `compressChunk()` / `endStream()` |
-| `StreamDecompressor` | Streaming decompression with `decompressChunk()` |
-| `CDict` | Prepared compression dictionary with `compress()` method |
-| `DDict` | Prepared decompression dictionary with `decompress()` method |
-| `CLevel` | Compression level enum (`.fastest`, `.default`, `.best`, `.raw`) |
-| `CompressOptions` | Compression options (level, checksum, dict_id, strategy, window_log) |
-| `DecompressOptions` | Decompression options (max_window_size, max_output_size, dict) |
-| `StreamCompressOptions` | Streaming compression options (level, checksum) |
-| `StreamDecompressOptions` | Streaming decompression options (dict) |
-| `CParameter` | Compression parameter enum (window_log, hash_log, chain_log, etc.) |
-| `DParameter` | Decompression parameter enum (window_log_max) |
-| `Strategy` | Compression strategy enum (fast, greedy, lazy, btopt, btultra, etc.) |
-| `Bounds` | Parameter bounds (lower_bound, upper_bound) |
-| `FrameInfo` | Frame metadata (content_size, window_size, dictionary_id, checksum) |
+| `CompressionContext` | Reusable compression context with `init(alloc)`, `initWithLevel(alloc, level)`, `compressAlloc(src)`, `compress(dst,src)`, `setLevel()`, `setChecksum()`, `setWindowLog()`, `deinit()` |
+| `DecompressionContext` | Reusable decompression context with `init(alloc)`, `decompressAlloc(src)`, `decompress(dst,src)`, `setMaxWindowSize()`, `deinit()` |
+| `StreamingCompressor` | Streaming compression with `init(alloc, level)`, `initWithOptions(alloc, opts)`, `compressStream(out,in,EndDirective)`, `reset()`, `deinit()` |
+| `StreamingDecompressor` | Streaming decompression with `init(alloc)`, `decompressStream(out,in)`, `decompressAll(out,in)`, `reset()`, `deinit()` |
+| `Dictionary` | Loaded dictionary with `dictId()`, `content()`, `deinit()` |
+| `DictionaryBuilder` | Builder with `init(alloc, params)`, `train(samples)`, `trainCover(k,d)`, `trainFastCover(k,d,f,accel)` |
+| `CompressionOptions` | Options struct with level, window_log, hash_log, chain_log, search_log, min_match, target_length, strategy, checksum, dict_id, content_size, enable_ldm |
+| `DecompressionOptions` | Options with `max_window_size`, `force_ignore_checksum` |
+| `Strategy` | Enum `fast, dfast, greedy, lazy, lazy2, btlazy2, btopt, btultra, btultra2` |
+| `FrameHeader` | Frame metadata `frame_type, header_size, window_size, block_size_max, dict_id, checksum_flag, content_size` |
+| `ZstdError` | Error set with `Corruption`, `ChecksumWrong`, `PrefixUnknown`, etc. |
 
 ### Namespaces
 
 | Namespace | Description |
 |---|---|
-| `zstd.Frame` | Frame inspection: `isFrame()`, `inspect()`, `contentSize()`, `compressedSize()`, `dictId()` |
-| `zstd.version` | Version info: `number`, `string`, `major`, `minor`, `release`, `clevel_default`, `clevel_min`, `clevel_max` |
-| `zstd.constants` | Constants: `magic_number`, `magic_dictionary`, `block_size_max`, `max_input_size` |
+| `zstd.legacy` | Legacy frame support: `isLegacy()`, `legacyVersion()`, `findFrameSize()`, `decompressLegacy()` for v01-v07 |
+| `zstd.version` | Version `version` string and `version_number` integer |
+| `zstd.constants` | Constants via top-level aliases `MAGICNUMBER`, `MAGIC_DICTIONARY`, `BLOCKSIZE_MAX`, `MAX_INPUT_SIZE`, `CONTENTSIZE_UNKNOWN` |
 
 ## Examples
 
-The `examples/` directory contains **9 comprehensive, runnable examples** demonstrating all features of `zstd.zig`:
+The `examples/` directory contains runnable examples demonstrating all features:
 
-| Example | Description |
-|---------|-------------|
-| [`basic`](examples/basic.zig) | Basic compress/decompress round trip |
-| [`streaming`](examples/streaming.zig) | Streaming compression with chunked input |
-| [`decompress`](examples/decompress.zig) | Decompression with pattern verification |
-| [`compression-levels`](examples/compression-levels.zig) | Named and numeric compression levels |
-| [`dictionary`](examples/dictionary.zig) | Dictionary creation, CDict compress, DDict decompress |
-| [`frame-inspection`](examples/frame-inspection.zig) | Frame metadata extraction and hex dump |
-| [`advanced-parameters`](examples/advanced-parameters.zig) | Parameter bounds queries and strategy comparison |
-| [`custom-allocator`](examples/custom-allocator.zig) | Page allocator and arena allocator usage |
-| [`streaming-decompress`](examples/streaming-decompress.zig) | Streaming decompression with multiple round trips |
+| Example | File | Description |
+|---------|------|-------------|
+| `basic_compression` | `examples/basic_compression.zig` | Basic compress/decompress round trip |
+| `basic_decompression` | `examples/basic_decompression.zig` | Decompression with verification |
+| `custom_level` | `examples/custom_level.zig` | Numeric compression levels 1-22 |
+| `advanced_params` | `examples/advanced_params.zig` | Custom window, checksum, and strategy via `CompressionOptions` |
+| `dictionary_compression` | `examples/dictionary_compression.zig` | Dictionary creation and header handling |
+| `dictionary_training` | `examples/dictionary_training.zig` | Training via `train`, `trainCover`, `trainFastCover` |
+| `streaming_compression` | `examples/streaming_compression.zig` | Streaming compression with `StreamingCompressor` |
+| `streaming_decompression` | `examples/streaming_decompression.zig` | Streaming decompression with `StreamingDecompressor` |
+| `custom_allocator` | `examples/custom_allocator.zig` | Custom allocator tracking |
+| `error_handling` | `examples/error_handling.zig` | Corruption, truncation, and buffer error cases |
+| `legacy_decompression` | `examples/legacy_decompression.zig` | Legacy frame detection for v01-v07 and skippable frames |
 
 To run any example:
 
 ```bash
-zig build run-basic
-zig build run-streaming
-zig build run-decompress
-zig build run-compression-levels
-zig build run-dictionary
-zig build run-frame-inspection
-zig build run-advanced-parameters
-zig build run-custom-allocator
-zig build run-streaming-decompress
+zig build run-basic_compression
+zig build run-streaming_compression
+zig build run-custom_level
+zig build run-dictionary_training
+zig build run-legacy_decompression
+zig build run-advanced_params
+zig build run-custom_allocator
+zig build run-error_handling
 ```
 
 ## Validation Matrix
@@ -377,31 +405,32 @@ Validate host functionality and cross-target compatibility with these commands:
 
 ```bash
 # Host runtime validation
-zig build test
+zig build test --summary all
 zig build run-all-examples
 
 # Cross-target library compile validation
 zig build -Dtarget=aarch64-linux
 zig build -Dtarget=x86_64-windows
 zig build -Dtarget=aarch64-macos
+
+# Cross-target tests with emulation
+zig build test -Dtarget=aarch64-linux --summary all -fqemu
+zig build test -Dtarget=x86-windows --summary all
 ```
 
-For explicit cross-target test compilation, pass `-Dtarget=...`:
+For explicit cross-target test compilation:
 
 ```bash
-# Example: compile tests for 32-bit Windows
-zig build test -Dtarget=x86-windows
-
-# Example: compile tests for macOS ARM64
-zig build test -Dtarget=aarch64-macos
+zig build test -Dtarget=x86-windows --summary all
+zig build test -Dtarget=aarch64-macos --summary all
 ```
 
 ## Building & Testing
 
 ```bash
 zig build                    # Build library
-zig build test               # Run all tests (44)
-zig build run-all-examples   # Run all 9 examples
+zig build test --summary all # Run all tests
+zig build run-all-examples   # Run all examples
 zig build docs               # Generate documentation site
 ```
 
@@ -412,8 +441,8 @@ Contributions are welcome! Please:
 1. Fork the repository
 2. Create a feature branch
 3. Add tests for new functionality
-4. Ensure all tests pass: `zig build test`
-5. Ensure formatting passes: `zig fmt src/`
+4. Ensure all tests pass: `zig build test --summary all`
+5. Ensure formatting passes: `zig fmt --check src/`
 6. Submit a pull request
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
