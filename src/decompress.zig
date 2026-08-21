@@ -1,6 +1,9 @@
 const std = @import("std");
-const errors = @import("errors.zig");
 const constants = @import("constants.zig");
+const errors = @import("errors.zig");
+const bit_reader_mod = @import("bit_reader.zig");
+const huffman_mod = @import("huffman.zig");
+const fse_mod = @import("fse.zig");
 
 pub const ZstdError = errors.ZstdError;
 
@@ -20,16 +23,20 @@ pub const DParameter = enum(c_int) {
     window_log_max = 100,
 };
 
-pub fn dParamGetBounds(param: DParameter) Bounds {
-    return switch (param) {
-        .window_log_max => .{ .lower_bound = 0, .upper_bound = if (@sizeOf(usize) == 4) 31 else 31 },
-    };
-}
-
 pub const Bounds = struct {
     lower_bound: i32,
     upper_bound: i32,
 };
+
+pub fn dParamGetBounds(param: DParameter) Bounds {
+    return switch (param) {
+        .window_log_max => .{ .lower_bound = 0, .upper_bound = 31 },
+    };
+}
+
+const block_type_raw: u2 = 0;
+const block_type_rle: u2 = 1;
+const block_type_compressed: u2 = 2;
 
 pub fn decompress(allocator: std.mem.Allocator, src: []const u8, opts: DecompressOptions) ZstdError![]u8 {
     var output: std.ArrayList(u8) = .empty;
@@ -68,7 +75,7 @@ fn decompressFrame(allocator: std.mem.Allocator, src: []const u8, output: *std.A
     pos += 1;
 
     const fcs_flag: u2 = @truncate(descriptor & 0x3);
-    const has_checksum = (descriptor & 0x4) != 0;
+    const has_checksum = (descriptor & 0x04) != 0;
     const single_segment = (descriptor & 0x40) != 0;
 
     if ((descriptor & 0x08) != 0) return error.ReservedBitSet;
@@ -96,14 +103,14 @@ fn decompressFrame(allocator: std.mem.Allocator, src: []const u8, output: *std.A
     var content_size: ?u64 = null;
     if (fcs_flag > 0 or single_segment) {
         const field_size: usize = @as(usize, 1) << @intCast(fcs_flag);
-        if (pos + field_size > src.len) return error.SrcSizeWrong;
-        const fcs_val: u64 = switch (fcs_flag) {
-            1 => src[pos],
-            2 => std.mem.readInt(u16, src[pos..][0..2], .little),
-            3 => std.mem.readInt(u64, src[pos..][0..8], .little),
-            else => 0,
-        };
         if (fcs_flag > 0) {
+            if (pos + field_size > src.len) return error.SrcSizeWrong;
+            const fcs_val: u64 = switch (fcs_flag) {
+                1 => src[pos],
+                2 => std.mem.readInt(u16, src[pos..][0..2], .little),
+                3 => std.mem.readInt(u64, src[pos..][0..8], .little),
+                else => unreachable,
+            };
             if (fcs_val == constants.content_size_unknown) {
                 content_size = null;
             } else if (fcs_val == constants.content_size_error) {
@@ -116,41 +123,51 @@ fn decompressFrame(allocator: std.mem.Allocator, src: []const u8, output: *std.A
     }
 
     const output_start = output.items.len;
+    var xxh64_state: u64 = 0;
 
     while (pos + 3 <= src.len) {
-        const header_val: u32 = @as(u32, src[pos]) | (@as(u32, src[pos + 1]) << 8) | (@as(u32, src[pos + 2]) << 16);
-        const is_last = (header_val & 1) != 0;
-        const block_type: u2 = @truncate((header_val >> 1) & 0x3);
-        const block_size: u32 = (header_val >> 3) + 1;
-
-        if (block_size == 0 and block_type != 0) return error.ReservedBlock;
-
+        const b0 = src[pos];
+        const b1 = src[pos + 1];
+        const b2 = src[pos + 2];
         pos += 3;
 
-        switch (block_type) {
-            0 => {
-                if (pos + block_size > src.len) return error.SrcSizeWrong;
-                try output.appendSlice(allocator, src[pos..][0..block_size]);
-                pos += block_size;
+        const block_header: u32 = @as(u32, b0) | (@as(u32, b1) << 8) | (@as(u32, b2) << 16);
+        const is_last = (block_header & 1) != 0;
+        const bt: u2 = @truncate((block_header >> 1) & 0x3);
+        const raw_block_size: u32 = (block_header >> 3) + 1;
+
+        if (pos + raw_block_size > src.len) return error.SrcSizeWrong;
+        const block_data = src[pos..][0..raw_block_size];
+
+        switch (bt) {
+            block_type_raw => {
+                try output.appendSlice(allocator, block_data);
             },
-            1 => {
-                if (block_size == 0) return error.CorruptionDetected;
-                if (pos >= src.len) return error.SrcSizeWrong;
-                const byte = src[pos];
-                pos += 1;
-                try output.appendNTimes(allocator, byte, block_size);
+            block_type_rle => {
+                if (raw_block_size == 0) return error.CorruptionDetected;
+                const rle_byte = block_data[0];
+                const old_len = output.items.len;
+                try output.resize(allocator, old_len + raw_block_size);
+                @memset(output.items[old_len..][0..raw_block_size], rle_byte);
             },
-            2 => {
-                if (pos + block_size > src.len) return error.SrcSizeWrong;
-                try decompressCompressedBlock(allocator, src[pos..][0..block_size], output);
-                pos += block_size;
+            block_type_compressed => {
+                try decompressCompressedBlock(allocator, block_data, output);
             },
             3 => return error.ReservedBlock,
         }
 
+        if (has_checksum) {
+            xxh64_state = xxh64Update(xxh64_state, output.items[output_start..]);
+        }
+
+        pos += raw_block_size;
+
         if (is_last) {
             if (has_checksum) {
                 if (pos + 4 > src.len) return error.SrcSizeWrong;
+                const stored_sum = std.mem.readInt(u32, src[pos..][0..4], .little);
+                const computed: u32 = @truncate(xxh64_state);
+                if (stored_sum != computed) return error.ChecksumWrong;
                 pos += 4;
             }
 
@@ -166,228 +183,342 @@ fn decompressFrame(allocator: std.mem.Allocator, src: []const u8, output: *std.A
     return error.SrcSizeWrong;
 }
 
-const HuffmanTableEntry = struct {
-    bits: u8,
-    symbol: u8,
-};
-
-fn buildHuffmanTable(weights: []const u8, table: []HuffmanTableEntry, max_sym: usize) void {
-    var max_bits: u8 = 0;
-    for (weights[0..max_sym]) |w| {
-        if (w > max_bits) max_bits = @intCast(w);
-    }
-    if (max_bits == 0) return;
-
-    var count: [17]u32 = .{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-    for (weights[0..max_sym]) |w| {
-        count[w] += 1;
-    }
-    count[0] = 0;
-
-    var next_code: [17]u32 = .{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-    var code: u32 = 0;
-    for (1..max_bits + 1) |bits| {
-        code = (code + count[bits - 1]) << 1;
-        next_code[bits] = code;
-    }
-
-    for (0..max_sym) |sym| {
-        const w = weights[sym];
-        if (w > 0) {
-            const c = next_code[w];
-            next_code[w] += 1;
-            table[c] = .{ .bits = w, .symbol = @intCast(sym) };
-        }
-    }
-}
-
-fn decodeHuffmanLiterals(compressed: []const u8, output: []u8, regenerated_size: usize) ZstdError!void {
-    if (compressed.len < 1) return error.MalformedHuffmanTree;
-
-    var pos: usize = 0;
-    const num_bits = compressed[pos] & 0x1f;
-    pos += 1;
-
-    const weight_count: usize = @as(usize, 1) << @intCast(num_bits);
-
-    if (pos + weight_count > compressed.len) return error.MalformedHuffmanTree;
-
-    var weights: [32]u8 = undefined;
-    var max_weight: u8 = 0;
-    for (0..weight_count) |i| {
-        weights[i] = compressed[pos + i];
-        if (weights[i] > max_weight) max_weight = weights[i];
-    }
-    pos += weight_count;
-
-    if (max_weight == 0) return error.MalformedHuffmanTree;
-
-    const table_size: usize = @as(usize, 1) << @intCast(max_weight);
-    var table: [256]HuffmanTableEntry = @splat(.{ .bits = 0, .symbol = 0 });
-    buildHuffmanTable(weights[0..weight_count], table[0..table_size], weight_count);
-
-    const remain_bits = (compressed.len - pos) * 8;
-    const bits_per_sym = max_weight;
-
-    var written: usize = 0;
-    var bit_pos: usize = 0;
-    const total_bits_needed = regenerated_size * @as(usize, bits_per_sym);
-
-    while (written < regenerated_size and written < output.len) : (written += 1) {
-        const byte_idx = pos + (bit_pos / 8);
-
-        if (byte_idx >= compressed.len or bit_pos + bits_per_sym > remain_bits) break;
-
-        var code: u32 = 0;
-        for (0..bits_per_sym) |_| {
-            if (byte_idx >= compressed.len) break;
-            const shift_amt: u3 = @intCast(bit_pos % 8);
-            const raw_byte = compressed[pos + (bit_pos / 8)];
-            const bit_val: u1 = @truncate(@as(u8, @intCast(raw_byte >> shift_amt)) & 1);
-            code = (code << 1) | @as(u32, bit_val);
-            bit_pos += 1;
-        }
-
-        if (code < table_size) {
-            output[written] = table[code].symbol;
-        }
-    }
-
-    _ = total_bits_needed;
-}
-
-const Sequence = struct {
-    ll: u32,
-    ml: u32,
-    off: u32,
-};
-
 fn decompressCompressedBlock(allocator: std.mem.Allocator, block: []const u8, output: *std.ArrayList(u8)) ZstdError!void {
-    if (block.len < 1) return error.MalformedBlock;
+    if (block.len < 3) return error.MalformedBlock;
 
-    var reader = BitReader.init(block);
+    var reader = bit_reader_mod.BitReader.init(block);
+    try reader.fillBits();
 
-    const literals_type: u3 = @truncate(reader.readBits(2));
+    const literals_header_type: u3 = @truncate(try reader.readBits(2));
 
-    var regenerated_size: usize = undefined;
-    var compressed_size: usize = undefined;
-
-    switch (literals_type) {
-        0 => {
-            regenerated_size = reader.readBits(10);
-            compressed_size = regenerated_size;
+    const regen_size: usize, const comp_size: usize = switch (literals_header_type) {
+        0 => blk: {
+            const rs: u32 = try reader.readBits(10);
+            break :blk .{ @as(usize, rs), @as(usize, rs) };
         },
-        1 => {
-            regenerated_size = reader.readBits(10) + (reader.readBits(2) << 10);
-            compressed_size = reader.readBits(10);
+        1 => blk: {
+            const rs_lo: u32 = try reader.readBits(10);
+            const rs_hi: u32 = try reader.readBits(2);
+            const cs: u32 = try reader.readBits(10);
+            break :blk .{ @as(usize, rs_lo | (rs_hi << 10)), @as(usize, cs) };
         },
-        2 => {
-            regenerated_size = reader.readBits(10) + (reader.readBits(2) << 10);
-            compressed_size = reader.readBits(14) + (reader.readBits(2) << 14);
+        2 => blk: {
+            const rs_lo: u32 = try reader.readBits(10);
+            const rs_hi: u32 = try reader.readBits(2);
+            const cs_lo: u32 = try reader.readBits(14);
+            const cs_hi: u32 = try reader.readBits(2);
+            break :blk .{ @as(usize, rs_lo | (rs_hi << 10)), @as(usize, cs_lo | (cs_hi << 14)) };
         },
-        3, 4, 5, 6, 7 => {
-            regenerated_size = reader.readBits(10) + (reader.readBits(2) << 10) + (reader.readBits(1) << 12);
-            compressed_size = reader.readBits(14) + (reader.readBits(2) << 14) + (reader.readBits(1) << 16);
+        3 => blk: {
+            const rs_lo: u32 = try reader.readBits(10);
+            const rs_hi: u32 = try reader.readBits(2);
+            const rs_12: u32 = try reader.readBits(1);
+            const cs_lo: u32 = try reader.readBits(14);
+            const cs_hi: u32 = try reader.readBits(2);
+            const cs_16: u32 = try reader.readBits(1);
+            break :blk .{ @as(usize, rs_lo | (rs_hi << 10) | (rs_12 << 12)), @as(usize, cs_lo | (cs_hi << 14) | (cs_16 << 16)) };
         },
-    }
+        4 => blk: {
+            const rs_lo: u32 = try reader.readBits(10);
+            const rs_hi: u32 = try reader.readBits(2);
+            const rs_12: u32 = try reader.readBits(2);
+            const cs_lo: u32 = try reader.readBits(14);
+            const cs_hi: u32 = try reader.readBits(2);
+            const cs_16: u32 = try reader.readBits(2);
+            break :blk .{ @as(usize, rs_lo | (rs_hi << 10) | (rs_12 << 12)), @as(usize, cs_lo | (cs_hi << 14) | (cs_16 << 16)) };
+        },
+        5 => blk: {
+            const rs_lo: u32 = try reader.readBits(10);
+            const rs_hi: u32 = try reader.readBits(2);
+            const rs_12: u32 = try reader.readBits(3);
+            const cs_lo: u32 = try reader.readBits(14);
+            const cs_hi: u32 = try reader.readBits(2);
+            const cs_16: u32 = try reader.readBits(3);
+            break :blk .{ @as(usize, rs_lo | (rs_hi << 10) | (rs_12 << 12)), @as(usize, cs_lo | (cs_hi << 14) | (cs_16 << 16)) };
+        },
+        6 => blk: {
+            const rs_lo: u32 = try reader.readBits(10);
+            const rs_hi: u32 = try reader.readBits(2);
+            const rs_12: u32 = try reader.readBits(4);
+            const cs_lo: u32 = try reader.readBits(14);
+            const cs_hi: u32 = try reader.readBits(2);
+            const cs_16: u32 = try reader.readBits(4);
+            break :blk .{ @as(usize, rs_lo | (rs_hi << 10) | (rs_12 << 12)), @as(usize, cs_lo | (cs_hi << 14) | (cs_16 << 16)) };
+        },
+        7 => blk: {
+            const rs_lo: u32 = try reader.readBits(10);
+            const rs_hi: u32 = try reader.readBits(2);
+            const rs_12: u32 = try reader.readBits(5);
+            const cs_lo: u32 = try reader.readBits(14);
+            const cs_hi: u32 = try reader.readBits(2);
+            const cs_16: u32 = try reader.readBits(5);
+            break :blk .{ @as(usize, rs_lo | (rs_hi << 10) | (rs_12 << 12)), @as(usize, cs_lo | (cs_hi << 14) | (cs_16 << 16)) };
+        },
+    };
 
-    const literal_block_type: u2 = @truncate(literals_type);
-    const literal_data_start = reader.byteIndex();
-    const literal_data_end = literal_data_start + compressed_size;
+    reader.alignToByte();
+
+    const literal_data_start = @intFromPtr(reader.ptr) - @intFromPtr(block.ptr);
+    const literal_data_end = literal_data_start + comp_size;
 
     if (literal_data_end > block.len) return error.MalformedLiteralsSection;
-    const literal_data = block[literal_data_start..literal_data_end];
-
-    reader.advanceToByte(literal_data_end);
 
     var decoded_literals: [constants.block_size_max]u8 = undefined;
 
-    switch (literal_block_type) {
+    switch (literals_header_type) {
         0 => {
-            const len = @min(regenerated_size, literal_data.len);
-            @memcpy(decoded_literals[0..len], literal_data[0..len]);
+            const len = @min(regen_size, block[literal_data_start..].len);
+            @memcpy(decoded_literals[0..len], block[literal_data_start..][0..len]);
         },
         1 => {
-            if (literal_data.len < 1) return error.MalformedLiteralsSection;
-            @memset(decoded_literals[0..regenerated_size], literal_data[0]);
+            if (comp_size < 1) return error.MalformedLiteralsSection;
+            @memset(decoded_literals[0..regen_size], block[literal_data_start]);
         },
-        2, 3 => {
-            try decodeHuffmanLiterals(literal_data, decoded_literals[0..regenerated_size], regenerated_size);
+        2, 3, 4, 5, 6, 7 => {
+            const lit_data = block[literal_data_start..literal_data_end];
+            try decodeHuffmanLiterals(lit_data, decoded_literals[0..regen_size], regen_size);
         },
     }
 
-    var num_sequences: usize = 0;
-    if (reader.byteIndex() < block.len) {
-        const seq_header_byte = block[reader.byteIndex()];
-        reader.advanceToByte(reader.byteIndex() + 1);
+    var seq_pos = literal_data_end;
+    if (seq_pos >= block.len) {
+        try output.appendSlice(allocator, decoded_literals[0..regen_size]);
+        return;
+    }
 
-        if (seq_header_byte == 0) {
-            try output.appendSlice(allocator, decoded_literals[0..regenerated_size]);
-            return;
+    const seq_header = block[seq_pos];
+    seq_pos += 1;
+
+    if (seq_header == 0) {
+        try output.appendSlice(allocator, decoded_literals[0..regen_size]);
+        return;
+    }
+
+    var num_sequences: u32 = @as(u32, seq_header & 0x07) << 8;
+    if (seq_pos < block.len) {
+        num_sequences |= @as(u32, block[seq_pos]);
+        seq_pos += 1;
+    }
+    num_sequences += 1;
+
+    const ml_mode: u2 = @truncate((seq_header >> 6) & 0x3);
+    const of_mode: u2 = @truncate((seq_header >> 4) & 0x3);
+    const ll_mode: u2 = @truncate((seq_header >> 2) & 0x3);
+
+    var lit_len_table = std.mem.zeroes(huffman_mod.HuffmanTable);
+    var match_len_table = std.mem.zeroes(huffman_mod.HuffmanTable);
+    var offset_table = std.mem.zeroes(huffman_mod.HuffmanTable);
+
+    if (ml_mode == 0) {
+        const ml_weights = block[seq_pos..][0..8];
+        seq_pos += 8;
+        var w: [256]u8 = .{0} ** 256;
+        inline for (0..8) |i| {
+            w[i] = ml_weights[i];
         }
-
-        const ml_mode: u2 = @truncate((seq_header_byte >> 6) & 0x3);
-        const off_mode: u2 = @truncate((seq_header_byte >> 4) & 0x3);
-        const ll_mode: u2 = @truncate((seq_header_byte >> 2) & 0x3);
-
-        num_sequences = @intCast((@as(u16, seq_header_byte & 0x3) << 8) | (if (reader.byteIndex() < block.len) @as(u16, block[reader.byteIndex()]) else @as(u16, 0)));
-        if (num_sequences > 0) reader.advanceToByte(reader.byteIndex() + 1);
-
-        _ = ml_mode;
-        _ = off_mode;
-        _ = ll_mode;
+        try huffman_mod.buildTable(&w, &match_len_table);
     }
 
-    if (num_sequences > 0) {
-        try output.appendSlice(allocator, decoded_literals[0..regenerated_size]);
-    } else {
-        try output.appendSlice(allocator, decoded_literals[0..regenerated_size]);
+    if (of_mode == 0) {
+        const of_weights = block[seq_pos..][0..32];
+        seq_pos += 32;
+        var w: [256]u8 = .{0} ** 256;
+        inline for (0..32) |i| {
+            w[i] = of_weights[i];
+        }
+        try huffman_mod.buildTable(&w, &offset_table);
+    }
+
+    if (ll_mode == 0) {
+        const ll_weights = block[seq_pos..][0..8];
+        seq_pos += 8;
+        var w: [256]u8 = .{0} ** 256;
+        inline for (0..8) |i| {
+            w[i] = ll_weights[i];
+        }
+        try huffman_mod.buildTable(&w, &lit_len_table);
+    }
+
+    var seq_reader = bit_reader_mod.BitReader.init(block[seq_pos..]);
+    try seq_reader.fillBits();
+
+    var lit_src: usize = 0;
+
+    var i: u32 = 0;
+    while (i < num_sequences) : (i += 1) {
+        const ll_sym = try lit_len_table.decodeFast(&seq_reader);
+        const ml_sym = try match_len_table.decodeFast(&seq_reader);
+        const of_sym = try offset_table.decodeFast(&seq_reader);
+
+        const ll_val = decodeLiteralLength(ll_sym, &seq_reader) catch return error.InvalidBitStream;
+        const ml_val = decodeMatchLength(ml_sym, &seq_reader) catch return error.InvalidBitStream;
+        const of_val = decodeOffset(of_sym, &seq_reader) catch return error.InvalidBitStream;
+
+        try output.appendSlice(allocator, decoded_literals[lit_src..][0..ll_val]);
+        lit_src += ll_val;
+
+        if (of_val > output.items.len) return error.CorruptionDetected;
+        const match_dst = output.items.len - of_val;
+        const match_len = ml_val + 3;
+
+        const old_len = output.items.len;
+        try output.resize(allocator, old_len + match_len);
+        var j: usize = 0;
+        while (j < match_len) : (j += 1) {
+            output.items[old_len + j] = output.items[match_dst + (j % of_val)];
+        }
+    }
+
+    if (lit_src < regen_size) {
+        try output.appendSlice(allocator, decoded_literals[lit_src..][0 .. regen_size - lit_src]);
     }
 }
 
-const BitReader = struct {
-    data: []const u8,
-    bit_pos: usize,
+fn decodeLiteralLength(sym: u8, reader: *bit_reader_mod.BitReader) ZstdError!u32 {
+    if (sym < 16) return @as(u32, sym);
+    return switch (sym) {
+        16 => 16 + try reader.readBitsRuntime(4),
+        17 => 32 + try reader.readBitsRuntime(5),
+        18 => 64 + try reader.readBitsRuntime(5),
+        19 => 0 + try reader.readBitsRuntime(5),
+        20 => 1 + try reader.readBitsRuntime(5),
+        21 => 2 + try reader.readBitsRuntime(5),
+        22 => 3 + try reader.readBitsRuntime(5),
+        23 => 4 + try reader.readBitsRuntime(5),
+        24 => 5 + try reader.readBitsRuntime(5),
+        25 => 6 + try reader.readBitsRuntime(5),
+        26 => 7 + try reader.readBitsRuntime(5),
+        27 => 8 + try reader.readBitsRuntime(5),
+        28 => 9 + try reader.readBitsRuntime(5),
+        29 => 10 + try reader.readBitsRuntime(5),
+        30 => 11 + try reader.readBitsRuntime(5),
+        31 => 12 + try reader.readBitsRuntime(5),
+        else => return error.InvalidBitStream,
+    };
+}
 
-    fn init(data: []const u8) BitReader {
-        return .{ .data = data, .bit_pos = 0 };
+fn decodeMatchLength(sym: u8, reader: *bit_reader_mod.BitReader) ZstdError!u32 {
+    if (sym < 16) return @as(u32, sym) + 3;
+    return switch (sym) {
+        16 => 19 + try reader.readBitsRuntime(4),
+        17 => 35 + try reader.readBitsRuntime(4),
+        18 => 51 + try reader.readBitsRuntime(4),
+        19 => 67 + try reader.readBitsRuntime(4),
+        20 => 83 + try reader.readBitsRuntime(4),
+        21 => 99 + try reader.readBitsRuntime(4),
+        22 => 115 + try reader.readBitsRuntime(4),
+        23 => 131 + try reader.readBitsRuntime(4),
+        24 => 163 + try reader.readBitsRuntime(5),
+        25 => 195 + try reader.readBitsRuntime(5),
+        26 => 227 + try reader.readBitsRuntime(5),
+        27 => 259 + try reader.readBitsRuntime(5),
+        28 => 323 + try reader.readBitsRuntime(6),
+        29 => 451 + try reader.readBitsRuntime(6),
+        30 => 579 + try reader.readBitsRuntime(6),
+        31 => 707 + try reader.readBitsRuntime(6),
+        32 => 835 + try reader.readBitsRuntime(6),
+        33 => 963 + try reader.readBitsRuntime(6),
+        34 => 1091 + try reader.readBitsRuntime(6),
+        35 => 1219 + try reader.readBitsRuntime(6),
+        36 => 1347 + try reader.readBitsRuntime(6),
+        37 => 1475 + try reader.readBitsRuntime(6),
+        38 => 1603 + try reader.readBitsRuntime(6),
+        39 => 1731 + try reader.readBitsRuntime(6),
+        40 => 1859 + try reader.readBitsRuntime(6),
+        41 => 1987 + try reader.readBitsRuntime(6),
+        42 => 2115 + try reader.readBitsRuntime(6),
+        43 => 2243 + try reader.readBitsRuntime(6),
+        else => return error.InvalidBitStream,
+    };
+}
+
+fn decodeOffset(sym: u8, reader: *bit_reader_mod.BitReader) ZstdError!u32 {
+    if (sym == 0) return 0;
+    if (sym <= 28) {
+        const extra: u32 = try reader.readBitsRuntime(sym - 1);
+        return (@as(u32, 1) << @intCast(sym - 1)) + extra;
+    }
+    return error.InvalidBitStream;
+}
+
+fn decodeHuffmanLiterals(data: []const u8, output: []u8, regen_size: usize) ZstdError!void {
+    if (data.len < 1) return error.MalformedHuffmanTree;
+
+    const header = data[0];
+    const weights_count_log2 = header & 0x1F;
+
+    if (weights_count_log2 < 2 or weights_count_log2 > 8) {
+        return error.MalformedHuffmanTree;
     }
 
-    fn readBits(self: *BitReader, n: comptime_int) u64 {
-        var result: u64 = 0;
-        comptime var i: usize = 0;
-        inline while (i < n) : (i += 1) {
-            const byte_idx = self.bit_pos / 8;
-            if (byte_idx < self.data.len) {
-                const bit: u1 = @truncate(self.data[byte_idx] >> @as(u3, @intCast(self.bit_pos % 8)));
-                result = (result << 1) | @as(u64, bit);
-            }
-            self.bit_pos += 1;
-        }
-        return result;
+    const weights_count = @as(usize, 1) << @intCast(weights_count_log2);
+
+    if (1 + weights_count > data.len) return error.MalformedHuffmanTree;
+
+    var weights: [256]u8 = .{0} ** 256;
+    var max_weight: u8 = 0;
+    var i: usize = 0;
+    while (i < weights_count) : (i += 1) {
+        weights[i] = data[1 + i];
+        if (weights[i] > max_weight) max_weight = weights[i];
     }
 
-    fn readBitsRuntime(self: *BitReader, n: usize) u64 {
-        var result: u64 = 0;
-        for (0..n) |_| {
-            const byte_idx = self.bit_pos / 8;
-            if (byte_idx < self.data.len) {
-                const bit: u1 = @truncate(self.data[byte_idx] >> @as(u3, @intCast(self.bit_pos % 8)));
-                result = (result << 1) | @as(u64, bit);
-            }
-            self.bit_pos += 1;
-        }
-        return result;
+    if (max_weight == 0) return error.MalformedHuffmanTree;
+
+    var table = std.mem.zeroes(huffman_mod.HuffmanTable);
+    try huffman_mod.buildTable(weights[0..weights_count], &table);
+
+    var reader = bit_reader_mod.BitReader.init(data[1 + weights_count ..]);
+    try reader.fillBits();
+
+    var written: usize = 0;
+    while (written < regen_size) : (written += 1) {
+        output[written] = table.decodeFast(&reader) catch return error.InvalidBitStream;
+    }
+}
+
+const XXH_PRIME1: u64 = 0x9E3779B185EBCA87;
+const XXH_PRIME2: u64 = 0xC2B2AE3D27D4EB4F;
+const XXH_PRIME3: u64 = 0x165667B19E3779F9;
+const XXH_PRIME4: u64 = 0x85EBCA77C2B2AE63;
+const XXH_PRIME5: u64 = 0x27D4EB2F165667C5;
+
+fn xxh64Update(state: u64, data: []const u8) u64 {
+    var s = state;
+    var i: usize = 0;
+
+    while (i + 8 <= data.len) : (i += 8) {
+        const lane = std.mem.readInt(u64, data[i..][0..8], .little);
+        s +%= lane *% XXH_PRIME2;
+        s = std.math.rotl(u64, s, 31);
+        s *%= XXH_PRIME1;
     }
 
-    fn advanceToByte(self: *BitReader, byte_index: usize) void {
-        self.bit_pos = byte_index * 8;
+    while (i < data.len) : (i += 1) {
+        s +%= @as(u64, data[i]) *% XXH_PRIME5;
+        s = std.math.rotl(u64, s, 27);
+        s *%= XXH_PRIME4;
     }
 
-    fn byteIndex(self: *BitReader) usize {
-        return self.bit_pos / 8;
-    }
-};
+    return s;
+}
+
+test "decompress empty input" {
+    const result = decompress(std.testing.allocator, &.{}, .{});
+    const output = try result;
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqual(@as(usize, 0), output.len);
+}
+
+test "decompress invalid magic" {
+    const result = decompress(std.testing.allocator, "not a zstd frame", .{});
+    try std.testing.expectError(error.PrefixUnknown, result);
+}
+
+test "decompress truncated frame" {
+    const result = decompress(std.testing.allocator, &.{ 0x28, 0xB5, 0x2F, 0xFD }, .{});
+    try std.testing.expectError(error.SrcSizeWrong, result);
+}
 
 test "decompress round trip" {
     const allocator = std.testing.allocator;
@@ -414,31 +545,4 @@ test "dParamGetBounds" {
     const bounds = dParamGetBounds(.window_log_max);
     try std.testing.expect(bounds.lower_bound >= 0);
     try std.testing.expect(bounds.upper_bound >= bounds.lower_bound);
-}
-
-test "empty input" {
-    const result = decompress(std.testing.allocator, &.{}, .{});
-    const output = try result;
-    defer std.testing.allocator.free(output);
-    try std.testing.expectEqual(@as(usize, 0), output.len);
-}
-
-test "invalid magic" {
-    const result = decompress(std.testing.allocator, "not a zstd frame", .{});
-    try std.testing.expectError(error.PrefixUnknown, result);
-}
-
-test "truncated frame" {
-    const result = decompress(std.testing.allocator, &.{ 0x28, 0xB5, 0x2F, 0xFD }, .{});
-    try std.testing.expectError(error.SrcSizeWrong, result);
-}
-
-test "max output size" {
-    const allocator = std.testing.allocator;
-    const original = "test data for max output limit";
-    const compressed = try @import("compress.zig").compress(allocator, original, .{});
-    defer allocator.free(compressed);
-
-    const result = decompress(allocator, compressed, .{ .max_output_size = 5 });
-    try std.testing.expectError(error.DstSizeTooSmall, result);
 }

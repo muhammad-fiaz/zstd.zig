@@ -8,7 +8,7 @@
 <a href="https://github.com/muhammad-fiaz/zstd.zig"><img src="https://img.shields.io/github/last-commit/muhammad-fiaz/zstd.zig" alt="GitHub last commit"></a>
 <a href="https://github.com/muhammad-fiaz/zstd.zig/blob/dev/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"></a>
 <a href="https://github.com/muhammad-fiaz/zstd.zig/actions/workflows/ci.yml"><img src="https://github.com/muhammad-fiaz/zstd.zig/actions/workflows/ci.yml/badge.svg?branch=dev" alt="CI"></a>
-<img src="https://img.shields.io/badge/platforms-linux%20%7C%20windows%20%7C%20macos%20%7C%20freebsd-blue" alt="Supported Platforms">
+<img src="https://img.shields.io/badge/platforms-linux%20%7C%20windows%20%7C%20macos-blue" alt="Supported Platforms">
 <a href="https://github.com/muhammad-fiaz/zstd.zig/releases/latest"><img src="https://img.shields.io/github/v/release/muhammad-fiaz/zstd.zig?label=Latest%20Release&style=flat-square" alt="Latest Release"></a>
 <a href="https://pay.muhammadfiaz.com"><img src="https://img.shields.io/badge/Sponsor-pay.muhammadfiaz.com-ff69b4?style=flat&logo=heart" alt="Sponsor"></a>
 <a href="https://github.com/sponsors/muhammad-fiaz"><img src="https://img.shields.io/badge/Sponsor-GitHub-pink?style=social&logo=github" alt="GitHub Sponsors"></a>
@@ -69,7 +69,7 @@
 | **Output Size Limits** | Configurable `max_output_size` to prevent unbounded allocation | Implemented |
 | **Multi-frame Decompression** | Decompress multiple concatenated zstd frames in sequence | Implemented |
 | **Skippable Frame Support** | Skip non-data frames during decompression | Implemented |
-| **Cross-platform** | Linux, Windows, macOS, FreeBSD with x86_64, aarch64, x86 support | Implemented |
+| **Cross-platform** | Linux, Windows, macOS with x86_64, aarch64, x86 support | Implemented |
 | **Zero Dependencies** | Pure Zig implementation — no C libraries, no system dependencies | Implemented |
 | **Strategy Selection** | Fast, DFast, Greedy, Lazy, Lazy2, BTLazy2, BTOpt, BTUltra strategies | Implemented |
 | **Compression Bound** | `compressBound()` for pre-allocating output buffers | Implemented |
@@ -90,16 +90,11 @@ Before using `zstd.zig`, ensure you have the following:
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| **Zig** | **0.16.0** or later | Download from [ziglang.org](https://ziglang.org/download/) |
-| **Operating System** | Windows 10+, Linux, macOS, FreeBSD | Cross-platform support |
+| **Zig** | **0.16.0** (recommended) | Download from [ziglang.org](https://ziglang.org/download/) |
+| **Operating System** | Windows 10+, Linux, macOS | Cross-platform support |
 
 > [!IMPORTANT]
-> **Zig 0.16.0 or later is required.** This project targets Zig 0.16.0 (stable). Install via:
-> ```bash
-> # Download from https://ziglang.org/download/
-> # Or using Scoop (Windows)
-> scoop install zig
-> ```
+> **Zig 0.16.0 is required.** This project targets Zig 0.16.0 (stable). Zig 0.17.0 is in development (dev branch, not yet a stable release) and introduces several minor breaking changes from 0.16.0. Migration to 0.17.0 will happen once it is officially released as a stable version. Please use Zig 0.16.0 for all builds.
 
 ---
 
@@ -112,7 +107,6 @@ Before using `zstd.zig`, ensure you have the following:
 | **Linux** | Yes | Yes | Yes |
 | **Windows** | Yes | Yes | Yes |
 | **macOS** | Yes | Yes (Apple Silicon) | No |
-| **FreeBSD** | Yes | Yes | No |
 
 ### Cross-Compilation
 
@@ -140,26 +134,34 @@ zig build -Dtarget=x86-windows
 
 ### Method 1: Zig Fetch (Recommended)
 
-Fetch the latest version directly:
+**Latest Release (v0.0.2)**
+
+```bash
+zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.2.tar.gz
+```
+
+### Method 2: Zig Fetch (Main Branch)
+
+Use the latest development version from the `dev` branch.
 
 ```bash
 zig fetch --save git+https://github.com/muhammad-fiaz/zstd.zig.git
 ```
 
-### Method 2: Manual `build.zig.zon` Configuration
+### Method 3: Manual `build.zig.zon` Configuration
 
-Add the dependency to your `build.zig.zon` file:
+Add the dependency to your `build.zig.zon` file.
 
 ```zig
 .dependencies = .{
     .zstd = .{
-        .url = "git+https://github.com/muhammad-fiaz/zstd.zig.git",
+        .url = "https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.2.tar.gz",
         .hash = "...", // Run `zig fetch --save <url>` to generate the hash.
     },
 },
 ```
 
-### Method 3: Local Source Checkout
+### Method 4: Local Source Checkout
 
 Clone the repository locally.
 
@@ -207,55 +209,64 @@ const decompressed = try zstd.decompress(allocator, compressed, .{});
 defer allocator.free(decompressed);
 ```
 
-### Compression Levels
+### Client Usage
 
 ```zig
-// Named levels
-const fast = try zstd.compress(allocator, data, .{ .level = .fastest });
-const balanced = try zstd.compress(allocator, data, .{ .level = .default });
-const small = try zstd.compress(allocator, data, .{ .level = .best });
+const std = @import("std");
+const zstd = @import("zstd");
 
-// Custom level (1-22)
-const custom = try zstd.compress(allocator, data, .{
-    .level = zstd.CLevel.fromInt(12),
-});
+pub fn main() !void {
+    const allocator = std.heap.page_allocator;
+
+    // Create compressor
+    var comp = zstd.Compressor.init(.{ .level = .default });
+    defer comp.deinit();
+
+    // Compress data
+    const compressed = try comp.compressAlloc(allocator, "Hello, zstd.zig!");
+    defer allocator.free(compressed);
+
+    // Decompress
+    const decompressed = try zstd.decompress(allocator, compressed, .{});
+    defer allocator.free(decompressed);
+
+    std.debug.print("Decompressed: {s}\n", .{decompressed});
+}
 ```
 
-### Reusable Contexts
+### Simplified API Aliases
+
+Every method is available as a top-level function for convenience.
 
 ```zig
-var comp = zstd.Compressor.init(.{ .level = .default });
-defer comp.deinit();
+// Compression
+const compressed = try zstd.compress(alloc, data, .{});
+const decompressed = try zstd.decompress(alloc, compressed, .{});
 
-const c1 = try comp.compressAlloc(allocator, data1);
-defer allocator.free(c1);
+// Frame detection
+const is_valid = zstd.isFrame(data);
+const content = zstd.getFrameContentSize(data);
+const size = try zstd.findFrameCompressedSize(data);
 
-const c2 = try comp.compressAlloc(allocator, data2);
-defer allocator.free(c2);
+// Version
+const ver = zstd.versionNumber();
+const str = zstd.versionString();
+const min = zstd.minCLevel();
+const max = zstd.maxCLevel();
+const def = zstd.defaultCLevel();
 ```
 
-### Streaming Compression
+### Streaming
 
 ```zig
 var comp = zstd.StreamCompressor.init(allocator, .{ .level = .default });
 defer comp.deinit();
 
-var output: [zstd.recommendedOutSize()]u8 = undefined;
+var output: [4096]u8 = undefined;
 
 const r1 = try comp.compressChunk(chunk1, &output, .@"continue");
 const r2 = try comp.compressChunk(chunk2, &output, .@"continue");
 const final = try comp.endStream(&output);
-```
-
-### Streaming Decompression
-
-```zig
-var sd = zstd.StreamDecompressor.init(allocator, .{});
-defer sd.deinit();
-
-var output: [zstd.recommendedDecompressOutSize()]u8 = undefined;
-const result = try sd.decompressChunk(compressed_data, &output);
-const text = output[0..result.bytes_written];
 ```
 
 ### Frame Inspection
@@ -286,16 +297,6 @@ const compressed = try cdict.compress(allocator, data);
 var ddict = zstd.DDict.init(dict);
 defer ddict.deinit();
 const decompressed = try ddict.decompress(allocator, compressed);
-```
-
-### Parameter Bounds
-
-```zig
-const window_log = try zstd.cParamGetBounds(.window_log);
-std.debug.print("Window log: {d} to {d}\n", .{ window_log.lower_bound, window_log.upper_bound });
-
-const hash_log = try zstd.cParamGetBounds(.hash_log);
-std.debug.print("Hash log: {d} to {d}\n", .{ hash_log.lower_bound, hash_log.upper_bound });
 ```
 
 ## API Reference
@@ -343,29 +344,9 @@ std.debug.print("Hash log: {d} to {d}\n", .{ hash_log.lower_bound, hash_log.uppe
 | `zstd.version` | Version info: `number`, `string`, `major`, `minor`, `release`, `clevel_default`, `clevel_min`, `clevel_max` |
 | `zstd.constants` | Constants: `magic_number`, `magic_dictionary`, `block_size_max`, `max_input_size` |
 
-### Convenience Aliases
-
-```zig
-// Compression
-const compressed = try zstd.compress(alloc, data, .{});
-const decompressed = try zstd.decompress(alloc, compressed, .{});
-
-// Frame detection
-const is_valid = zstd.isFrame(data);
-const content = zstd.getFrameContentSize(data);
-const size = try zstd.findFrameCompressedSize(data);
-
-// Version
-const ver = zstd.versionNumber();
-const str = zstd.versionString();
-const min = zstd.minCLevel();
-const max = zstd.maxCLevel();
-const def = zstd.defaultCLevel();
-```
-
 ## Examples
 
-The `examples/` directory contains **9 comprehensive, runnable examples** demonstrating all features:
+The `examples/` directory contains **9 comprehensive, runnable examples** demonstrating all features of `zstd.zig`:
 
 | Example | Description |
 |---------|-------------|
@@ -393,17 +374,13 @@ zig build run-custom-allocator
 zig build run-streaming-decompress
 ```
 
-## Building & Testing
+## Validation Matrix
+
+Validate host functionality and cross-target compatibility with these commands:
 
 ```bash
-zig build            # Build library
-zig build test       # Run all tests (35+)
-zig build docs       # Generate documentation site
-```
-
-### Run All Examples
-
-```bash
+# Host runtime validation
+zig build test
 zig build run-basic
 zig build run-streaming
 zig build run-decompress
@@ -413,6 +390,29 @@ zig build run-frame-inspection
 zig build run-advanced-parameters
 zig build run-custom-allocator
 zig build run-streaming-decompress
+
+# Cross-target library compile validation
+zig build -Dtarget=aarch64-linux
+zig build -Dtarget=x86_64-windows
+zig build -Dtarget=aarch64-macos
+```
+
+For explicit cross-target test compilation, pass `-Dtarget=...`:
+
+```bash
+# Example: compile tests for 32-bit Windows
+zig build test -Dtarget=x86-windows
+
+# Example: compile tests for macOS ARM64
+zig build test -Dtarget=aarch64-macos
+```
+
+## Building & Testing
+
+```bash
+zig build            # Build library
+zig build test       # Run all tests (35+)
+zig build docs       # Generate documentation site
 ```
 
 ## Contributing
@@ -423,7 +423,7 @@ Contributions are welcome! Please:
 2. Create a feature branch
 3. Add tests for new functionality
 4. Ensure all tests pass: `zig build test`
-5. Ensure formatting passes: `zig build fmt`
+5. Ensure formatting passes: `zig fmt src/`
 6. Submit a pull request
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.

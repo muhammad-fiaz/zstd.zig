@@ -9,20 +9,15 @@ pub const frame_mod = @import("frame.zig");
 pub const constants_mod = @import("constants.zig");
 pub const version_mod = @import("version.zig");
 
-// ── Error types ──────────────────────────────────────────────────
 pub const ZstdError = errors.ZstdError;
 pub const ErrorCode = errors.ErrorCode;
 pub const Error = ZstdError;
 
-// ── Compression level ────────────────────────────────────────────
 pub const CLevel = compress_mod.CLevel;
-
-// ── Options structs ──────────────────────────────────────────────
 pub const CompressOptions = compress_mod.CompressOptions;
 pub const DecompressOptions = decompress_mod.DecompressOptions;
-
-// ── Reusable compressor / decompressor ───────────────────────────
 pub const Compressor = compress_mod.Compressor;
+
 pub const Decompressor = struct {
     allocator: std.mem.Allocator,
     opts: DecompressOptions,
@@ -40,27 +35,22 @@ pub const Decompressor = struct {
     }
 };
 
-// ── Streaming ────────────────────────────────────────────────────
 pub const StreamCompressor = streaming_mod.StreamCompressor;
 pub const StreamDecompressor = streaming_mod.StreamDecompressor;
 pub const StreamCompressOptions = streaming_mod.StreamCompressOptions;
 pub const StreamDecompressOptions = streaming_mod.StreamDecompressOptions;
 pub const EndDirective = streaming_mod.EndDirective;
-
 pub const StreamResult = streaming_mod.StreamResult;
 
-// ── Dictionary types ─────────────────────────────────────────────
 pub const CDict = dict_mod.CDict;
 pub const DDict = dict_mod.DDict;
 pub const DictParams = dict_mod.DictParams;
 
-// ── CParameter, Strategy, ResetDirective ─────────────────────────
 pub const CParameter = compress_mod.CParameter;
 pub const Strategy = compress_mod.Strategy;
 pub const ResetDirective = compress_mod.ResetDirective;
 pub const Bounds = compress_mod.Bounds;
 
-// ── Frame namespace ──────────────────────────────────────────────
 pub const Frame = struct {
     pub const isFrame = frame_mod.isFrame;
     pub const contentSize = frame_mod.contentSize;
@@ -71,11 +61,9 @@ pub const Frame = struct {
     pub const FrameInfo = frame_mod.FrameInfo;
 };
 
-// ── DParameter (decompression parameters) ───────────────────────
 pub const DParameter = decompress_mod.DParameter;
 pub const dParamGetBounds = decompress_mod.dParamGetBounds;
 
-// ── Version namespace ────────────────────────────────────────────
 pub const version = struct {
     pub const number = version_mod.number;
     pub const string = version_mod.string;
@@ -87,7 +75,6 @@ pub const version = struct {
     pub const clevel_max = version_mod.clevel_max;
 };
 
-// ── Constants namespace ──────────────────────────────────────────
 pub const constants = struct {
     pub const magic_number = constants_mod.magic_number;
     pub const magic_dictionary = constants_mod.magic_dictionary;
@@ -100,7 +87,6 @@ pub const constants = struct {
     pub const max_input_size = constants_mod.max_input_size;
 };
 
-// ── Top-level functions ──────────────────────────────────────────
 pub fn compress(allocator: std.mem.Allocator, src: []const u8, opts: CompressOptions) ZstdError![]u8 {
     return compress_mod.compress(allocator, src, opts);
 }
@@ -113,7 +99,6 @@ pub fn compressBound(src_size: usize) ZstdError!usize {
     return compress_mod.compressBound(src_size);
 }
 
-// ── Dictionary convenience functions ─────────────────────────────
 pub const compressUsingDict = dict_mod.compressUsingDict;
 pub const decompressUsingDict = dict_mod.decompressUsingDict;
 pub const compressUsingCDict = dict_mod.compressUsingCDict;
@@ -123,23 +108,12 @@ pub const getDictIDFromFrame = dict_mod.getDictIDFromFrame;
 pub const trainFromSamples = dict_mod.trainFromSamples;
 pub const finalizeDictionary = dict_mod.finalizeDictionary;
 
-// ── Streaming convenience functions ──────────────────────────────
 pub const recommendedInSize = streaming_mod.recommendedInSize;
 pub const recommendedOutSize = streaming_mod.recommendedOutSize;
 pub const recommendedDecompressInSize = streaming_mod.recommendedDecompressInSize;
 pub const recommendedDecompressOutSize = streaming_mod.recommendedDecompressOutSize;
 
-// ── CParameter bounds ────────────────────────────────────────────
 pub const cParamGetBounds = compress_mod.cParamGetBounds;
-
-// ── Backward-compatible aliases ──────────────────────────────────
-pub const VERSION_NUMBER = version.number;
-pub const VERSION_STRING = version.string;
-pub const CLEVEL_DEFAULT = version.clevel_default;
-pub const MAGIC_NUMBER = constants.magic_number;
-pub const BLOCKSIZE_MAX = constants.block_size_max;
-pub const CONTENTSIZE_UNKNOWN = constants.content_size_unknown;
-pub const ContentSizeResult = frame_mod.ContentSizeResult;
 
 pub fn versionNumber() u32 {
     return version.number;
@@ -165,7 +139,7 @@ pub fn isFrame(src: []const u8) bool {
     return Frame.isFrame(src);
 }
 
-pub fn getFrameContentSize(src: []const u8) ContentSizeResult {
+pub fn getFrameContentSize(src: []const u8) frame_mod.ContentSizeResult {
     return Frame.contentSize(src);
 }
 
@@ -173,7 +147,6 @@ pub fn findFrameCompressedSize(src: []const u8) ZstdError!usize {
     return Frame.compressedSize(src);
 }
 
-// ── Tests ────────────────────────────────────────────────────────
 test {
     _ = errors;
     _ = compress_mod;

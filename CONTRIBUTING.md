@@ -67,12 +67,16 @@ This is a **pure Zig implementation** — no C dependencies or bindings.
 * `src/zstd.zig` — Public API facade
 * `src/errors.zig` — Error codes and ZstdError set
 * `src/compress.zig` — Compressor and compression options
-* `src/decompress.zig` — Decompressor with safety limits
+* `src/decompress.zig` — Decompressor with frame/block parsing
 * `src/streaming.zig` — StreamCompressor/StreamDecompressor
 * `src/dict.zig` — Dictionary support (CDict/DDict)
 * `src/frame.zig` — Frame inspection utilities
 * `src/constants.zig` — Magic numbers and sizes
 * `src/version.zig` — Version information
+* `src/bit_reader.zig` — Bitstream reader for Huffman/FSE decoding
+* `src/huffman.zig` — Huffman table construction and decoding
+* `src/fse.zig` — FSE table construction and decoding
+* `src/entropy.zig` — Huffman+FSE table building for compressed blocks
 
 ### Key Design Principles
 
@@ -100,8 +104,7 @@ const std = @import("std");
 const zstd = @import("zstd");
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+    const allocator = std.heap.page_allocator;
     
     // Your example code here
 }
@@ -141,7 +144,7 @@ npm run dev
 ## Pull Request Process
 
 1. Update documentation if needed
-2. Ensure CI passes (`zig build test`, `zig build fmt`)
+2. Ensure CI passes (`zig build test`, `zig fmt src/`)
 3. Request review from maintainers
 
 ## Reporting Issues

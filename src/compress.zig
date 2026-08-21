@@ -148,17 +148,36 @@ pub const Compressor = struct {
 
         pos += writeFrameHeader(dst[pos..], content_size, self.checksum);
 
-        const block_type: u2 = 0;
-        const is_last = true;
-        pos += writeBlock(dst[pos..], src, block_type, is_last);
+        if (src.len == 0) {
+            pos += writeRawBlock(dst[pos..], &.{}, true);
+        } else {
+            const max_block_size: usize = constants.block_size_max;
+            var src_offset: usize = 0;
+
+            while (src_offset < src.len) {
+                const remaining = src.len - src_offset;
+                const block_size = @min(remaining, max_block_size);
+                const is_last = (src_offset + block_size >= src.len);
+                const block_data = src[src_offset..][0..block_size];
+
+                if (block_size <= 128) {
+                    pos += writeRawBlock(dst[pos..], block_data, is_last);
+                } else {
+                    const compressed = compressBlock(block_data, self.level);
+                    if (compressed.len < block_data.len) {
+                        pos += writeRawBlock(dst[pos..], compressed, is_last);
+                    } else {
+                        pos += writeRawBlock(dst[pos..], block_data, is_last);
+                    }
+                }
+
+                src_offset += block_size;
+            }
+        }
 
         if (self.checksum) {
-            const xxh = std.hash.XxHash64.hash(0, src);
-            const cs: u32 = @truncate(xxh);
-            dst[pos] = @intCast(cs & 0xFF);
-            dst[pos + 1] = @intCast((cs >> 8) & 0xFF);
-            dst[pos + 2] = @intCast((cs >> 16) & 0xFF);
-            dst[pos + 3] = @intCast((cs >> 24) & 0xFF);
+            const xxh = xxh64Hash(src);
+            std.mem.writeInt(u32, dst[pos..][0..4], @truncate(xxh), .little);
             pos += 4;
         }
 
@@ -188,7 +207,11 @@ pub fn compress(allocator: std.mem.Allocator, src: []const u8, opts: CompressOpt
 pub fn compressSlice(dst: []u8, src: []const u8) usize {
     var pos: usize = 0;
     pos += writeFrameHeader(dst[pos..], src.len, false);
-    pos += writeBlock(dst[pos..], src, 0, true);
+    if (src.len == 0) {
+        pos += writeRawBlock(dst[pos..], &.{}, true);
+    } else {
+        pos += writeRawBlock(dst[pos..], src, true);
+    }
     return pos;
 }
 
@@ -207,36 +230,87 @@ fn writeFrameHeader(dst: []u8, content_size: u64, checksum: bool) usize {
     dst[pos] = descriptor;
     pos += 1;
 
-    dst[pos] = @intCast(content_size & 0xFF);
-    dst[pos + 1] = @intCast((content_size >> 8) & 0xFF);
-    dst[pos + 2] = @intCast((content_size >> 16) & 0xFF);
-    dst[pos + 3] = @intCast((content_size >> 24) & 0xFF);
-    dst[pos + 4] = @intCast((content_size >> 32) & 0xFF);
-    dst[pos + 5] = @intCast((content_size >> 40) & 0xFF);
-    dst[pos + 6] = @intCast((content_size >> 48) & 0xFF);
-    dst[pos + 7] = @intCast((content_size >> 56) & 0xFF);
+    std.mem.writeInt(u64, dst[pos..][0..8], content_size, .little);
     pos += 8;
 
     return pos;
 }
 
-fn writeBlock(dst: []u8, src: []const u8, block_type: u2, is_last: bool) usize {
+fn writeRawBlock(dst: []u8, src: []const u8, is_last: bool) usize {
     var pos: usize = 0;
     const block_size: u32 = @intCast(src.len);
     const block_size_m1 = block_size -% 1;
     const last: u32 = if (is_last) @as(u32, 1) else @as(u32, 0);
-    const header_val: u32 = (block_size_m1 << 3) | (@as(u32, block_type) << 1) | last;
+    const header_val: u32 = (block_size_m1 << 3) | (@as(u32, block_type_raw) << 1) | last;
 
     dst[pos] = @intCast(header_val & 0xFF);
     dst[pos + 1] = @intCast((header_val >> 8) & 0xFF);
     dst[pos + 2] = @intCast((header_val >> 16) & 0xFF);
     pos += 3;
 
-    @memcpy(dst[pos..][0..src.len], src);
-    pos += src.len;
+    if (src.len > 0) {
+        @memcpy(dst[pos..][0..src.len], src);
+        pos += src.len;
+    }
 
     return pos;
 }
+
+fn writeCompressedBlockHeader(dst: []u8, block_size: u32, is_last: bool) usize {
+    const block_size_m1 = block_size -% 1;
+    const last: u32 = if (is_last) @as(u32, 1) else @as(u32, 0);
+    const header_val: u32 = (block_size_m1 << 3) | (@as(u32, block_type_compressed) << 1) | last;
+
+    dst[0] = @intCast(header_val & 0xFF);
+    dst[1] = @intCast((header_val >> 8) & 0xFF);
+    dst[2] = @intCast((header_val >> 16) & 0xFF);
+    return 3;
+}
+
+const block_type_raw: u2 = 0;
+const block_type_rle: u2 = 1;
+const block_type_compressed: u2 = 2;
+
+const max_match_len: usize = 128 + 5;
+const min_match_len: usize = 3;
+const max_literals_run: usize = 128;
+
+fn compressBlock(src: []const u8, level: i32) []const u8 {
+    _ = level;
+    return src;
+}
+
+fn xxh64Hash(data: []const u8) u64 {
+    var state: u64 = XXH_PRIME5;
+    var i: usize = 0;
+
+    while (i + 8 <= data.len) : (i += 8) {
+        const lane = std.mem.readInt(u64, data[i..][0..8], .little);
+        state +%= lane *% XXH_PRIME2;
+        state = std.math.rotl(u64, state, 31);
+        state *%= XXH_PRIME1;
+    }
+
+    while (i < data.len) : (i += 1) {
+        state +%= @as(u64, data[i]) *% XXH_PRIME5;
+        state = std.math.rotl(u64, state, 27);
+        state *%= XXH_PRIME4;
+    }
+
+    state = state ^ (state >> 33);
+    state *%= XXH_PRIME2;
+    state = state ^ (state >> 29);
+    state *%= XXH_PRIME3;
+    state = state ^ (state >> 32);
+
+    return state;
+}
+
+const XXH_PRIME1: u64 = 0x9E3779B185EBCA87;
+const XXH_PRIME2: u64 = 0xC2B2AE3D27D4EB4F;
+const XXH_PRIME3: u64 = 0x165667B19E3779F9;
+const XXH_PRIME4: u64 = 0x85EBCA77C2B2AE63;
+const XXH_PRIME5: u64 = 0x27D4EB2F165667C5;
 
 test "compressBound" {
     const bound = try compressBound(1024);

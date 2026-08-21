@@ -104,6 +104,7 @@ pub const ZstdError = error{
     WindowOversize,
     ContentOversize,
     DictionaryIdFlagUnsupported,
+    InvalidBlockData,
 };
 
 pub fn isError(result: usize) bool {
