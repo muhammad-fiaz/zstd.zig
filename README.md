@@ -1,3 +1,5 @@
+# zstd.zig
+
 <div align="center">
 
 <a href="https://muhammad-fiaz.github.io/zstd.zig/"><img src="https://img.shields.io/badge/docs-muhammad--fiaz.github.io-blue" alt="Documentation"></a>
