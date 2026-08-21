@@ -17,9 +17,6 @@ test "compressHuffman roundtrip" {
     try std.testing.expectEqualSlices(u8, &src, &decompressed);
 }
 
-
-
-
 test "buildWeights basic" {
     var weights: [256]u8 = undefined;
     const counts = [_]u32{ 10, 5, 3 };

@@ -561,4 +561,3 @@ test "interoperability checksummed frame validation" {
     defer alloc.free(decomp);
     try std.testing.expectEqualStrings(payload, decomp);
 }
-
