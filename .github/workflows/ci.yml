@@ -7,20 +7,44 @@ on:
     branches: [main, dev]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
-      - run: zig build
-
   test:
+    name: ${{ matrix.os }} / ${{ matrix.arch }} / Zig ${{ matrix.zig }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        arch: [x86_64, aarch64]
+        zig: ["0.16.0"]
+        include:
+          - os: ubuntu-latest
+            arch: x86
+            zig: "0.16.0"
+          - os: windows-latest
+            arch: x86
+            zig: "0.16.0"
+        exclude:
+          - os: macos-latest
+            arch: x86
+          - os: macos-latest
+            arch: x86_64
+            # macos x86_64 is covered via arm64 runner? keep one macos entry
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Zig ${{ matrix.zig }} (${{ matrix.arch }})
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ matrix.zig }}
+      - name: Build
+        run: zig build -Dtarget=${{ matrix.arch }}-${{ fromJSON('{"ubuntu-latest":"linux","windows-latest":"windows","macos-latest":"macos"}')[matrix.os] }}
+      - name: Test
+        run: zig build test -Dtarget=${{ matrix.arch }}-${{ fromJSON('{"ubuntu-latest":"linux","windows-latest":"windows","macos-latest":"macos"}')[matrix.os] }} --summary all
+
+  fmt:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
-      - run: zig build test
+      - run: zig fmt --check src/

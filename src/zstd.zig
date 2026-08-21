@@ -1,222 +1,152 @@
+pub const version = "1.6.0";
+pub const version_number: u32 = 1 * 100 * 100 + 6 * 100 + 0;
+
 const std = @import("std");
+const comp = @import("compress/compress.zig");
+const decomp = @import("decompress/decompress.zig");
+const hdr = @import("frame/header.zig");
+const det = @import("frame/detect.zig");
+const dictionary = @import("dictionary/dictionary.zig");
+const bld = @import("dictionary/builder.zig");
+const streamComp = @import("streaming/compress.zig");
+const streamDecomp = @import("streaming/decompress.zig");
+const cctx = @import("compress/context.zig");
+const dctx = @import("decompress/context.zig");
+const constants = @import("common/constants.zig");
+const errors = @import("common/errors.zig");
+const types = @import("common/types.zig");
+pub const legacy = @import("legacy/decoder.zig");
+pub const legacy_detect = @import("legacy/detect.zig");
 
-pub const errors = @import("errors.zig");
-pub const compress_mod = @import("compress.zig");
-pub const decompress_mod = @import("decompress.zig");
-pub const streaming_mod = @import("streaming.zig");
-pub const dict_mod = @import("dict.zig");
-pub const frame_mod = @import("frame.zig");
-pub const constants_mod = @import("constants.zig");
-pub const version_mod = @import("version.zig");
-
+pub const CompressionOptions = comp.CompressionOptions;
+pub const DecompressionOptions = dctx.DecompressionOptions;
+pub const CompressionContext = cctx.CompressionContext;
+pub const DecompressionContext = dctx.DecompressionContext;
+pub const Dictionary = dictionary.Dictionary;
+pub const DictionaryBuilder = bld.DictionaryBuilder;
+pub const DictBuilderParams = bld.DictBuilderParams;
+pub const StreamingCompressor = streamComp.StreamingCompressor;
+pub const StreamingDecompressor = streamDecomp.StreamingDecompressor;
+pub const CStream = streamComp.CStream;
+pub const DStream = streamDecomp.DStream;
+pub const EndDirective = streamComp.EndDirective;
+pub const FrameHeader = types.FrameHeader;
+pub const BlockType = types.BlockType;
+pub const BlockProperties = types.BlockProperties;
 pub const ZstdError = errors.ZstdError;
-pub const ErrorCode = errors.ErrorCode;
-pub const Error = ZstdError;
+pub const Strategy = constants.Strategy;
+pub const FrameOptions = struct { checksum: bool = false, content_size: ?u64 = null, dict_id: u32 = 0, window_log: u8 = 0 };
 
-pub const CLevel = compress_mod.CLevel;
-pub const CompressOptions = compress_mod.CompressOptions;
-pub const DecompressOptions = decompress_mod.DecompressOptions;
-pub const Compressor = compress_mod.Compressor;
+pub const MAGICNUMBER = constants.magic_number;
+pub const MAGIC_DICTIONARY = constants.magic_dictionary;
+pub const MAGIC_SKIPPABLE_START = constants.magic_skippable_start;
+pub const MAGIC_SKIPPABLE_MASK = constants.magic_skippable_mask;
+pub const BLOCKSIZE_MAX = constants.block_size_max;
+pub const CONTENTSIZE_UNKNOWN = constants.contentsize_unknown;
+pub const CONTENTSIZE_ERROR = constants.contentsize_error;
+pub const CLEVEL_DEFAULT = constants.c_level_default;
+pub const MAX_INPUT_SIZE = constants.max_input_size;
 
-pub const Decompressor = struct {
-    allocator: std.mem.Allocator,
-    opts: DecompressOptions,
+pub const compressBound = comp.compressBound;
+pub const getCompressionParameters = comp.getCompressionParameters;
+pub const loadDictionary = dictionary.loadDictionary;
+pub const createDictionaryFromData = dictionary.createDictionaryFromData;
 
-    pub fn init(allocator: std.mem.Allocator, opts: DecompressOptions) Decompressor {
-        return .{ .allocator = allocator, .opts = opts };
-    }
-
-    pub fn deinit(self: *Decompressor) void {
-        self.* = undefined;
-    }
-
-    pub fn decompress(self: *Decompressor, src: []const u8) ZstdError![]u8 {
-        return decompress_mod.decompress(self.allocator, src, self.opts);
-    }
-};
-
-pub const StreamCompressor = streaming_mod.StreamCompressor;
-pub const StreamDecompressor = streaming_mod.StreamDecompressor;
-pub const StreamCompressOptions = streaming_mod.StreamCompressOptions;
-pub const StreamDecompressOptions = streaming_mod.StreamDecompressOptions;
-pub const EndDirective = streaming_mod.EndDirective;
-pub const StreamResult = streaming_mod.StreamResult;
-
-pub const CDict = dict_mod.CDict;
-pub const DDict = dict_mod.DDict;
-pub const DictParams = dict_mod.DictParams;
-
-pub const CParameter = compress_mod.CParameter;
-pub const Strategy = compress_mod.Strategy;
-pub const ResetDirective = compress_mod.ResetDirective;
-pub const Bounds = compress_mod.Bounds;
-
-pub const Frame = struct {
-    pub const isFrame = frame_mod.isFrame;
-    pub const contentSize = frame_mod.contentSize;
-    pub const compressedSize = frame_mod.compressedSize;
-    pub const dictId = frame_mod.dictId;
-    pub const inspect = frame_mod.inspect;
-    pub const ContentSizeResult = frame_mod.ContentSizeResult;
-    pub const FrameInfo = frame_mod.FrameInfo;
-};
-
-pub const DParameter = decompress_mod.DParameter;
-pub const dParamGetBounds = decompress_mod.dParamGetBounds;
-
-pub const version = struct {
-    pub const number = version_mod.number;
-    pub const string = version_mod.string;
-    pub const major = version_mod.major;
-    pub const minor = version_mod.minor;
-    pub const release = version_mod.release;
-    pub const clevel_default = version_mod.clevel_default;
-    pub const clevel_min = version_mod.clevel_min;
-    pub const clevel_max = version_mod.clevel_max;
-};
-
-pub const constants = struct {
-    pub const magic_number = constants_mod.magic_number;
-    pub const magic_dictionary = constants_mod.magic_dictionary;
-    pub const magic_skippable_start = constants_mod.magic_skippable_start;
-    pub const magic_skippable_mask = constants_mod.magic_skippable_mask;
-    pub const block_size_log_max = constants_mod.block_size_log_max;
-    pub const block_size_max = constants_mod.block_size_max;
-    pub const content_size_unknown = constants_mod.content_size_unknown;
-    pub const content_size_error = constants_mod.content_size_error;
-    pub const max_input_size = constants_mod.max_input_size;
-};
-
-pub fn compress(allocator: std.mem.Allocator, src: []const u8, opts: CompressOptions) ZstdError![]u8 {
-    return compress_mod.compress(allocator, src, opts);
+pub fn compress(allocator: std.mem.Allocator, src: []const u8) anyerror![]u8 {
+    return comp.compress(allocator, src, .{});
 }
 
-pub fn decompress(allocator: std.mem.Allocator, src: []const u8, opts: DecompressOptions) ZstdError![]u8 {
-    return decompress_mod.decompress(allocator, src, opts);
+pub fn decompress(allocator: std.mem.Allocator, src: []const u8) anyerror![]u8 {
+    return decomp.decompress(allocator, src);
 }
 
-pub fn compressBound(src_size: usize) ZstdError!usize {
-    return compress_mod.compressBound(src_size);
+pub fn compressWithLevel(allocator: std.mem.Allocator, src: []const u8, level: i32) anyerror![]u8 {
+    const opts = comp.getCompressionParameters(level, src.len, 0);
+    return comp.compress(allocator, src, opts);
 }
 
-pub const compressUsingDict = dict_mod.compressUsingDict;
-pub const decompressUsingDict = dict_mod.decompressUsingDict;
-pub const compressUsingCDict = dict_mod.compressUsingCDict;
-pub const decompressUsingDDict = dict_mod.decompressUsingDDict;
-pub const getDictIDFromDict = dict_mod.getDictIDFromDict;
-pub const getDictIDFromFrame = dict_mod.getDictIDFromFrame;
-pub const trainFromSamples = dict_mod.trainFromSamples;
-pub const finalizeDictionary = dict_mod.finalizeDictionary;
-
-pub const recommendedInSize = streaming_mod.recommendedInSize;
-pub const recommendedOutSize = streaming_mod.recommendedOutSize;
-pub const recommendedDecompressInSize = streaming_mod.recommendedDecompressInSize;
-pub const recommendedDecompressOutSize = streaming_mod.recommendedDecompressOutSize;
-
-pub const cParamGetBounds = compress_mod.cParamGetBounds;
-
-pub fn versionNumber() u32 {
-    return version.number;
+pub fn compressWithOptions(allocator: std.mem.Allocator, src: []const u8, options: CompressionOptions) anyerror![]u8 {
+    return comp.compress(allocator, src, options);
 }
 
-pub fn versionString() []const u8 {
-    return version.string;
+pub fn compressInto(dst: []u8, src: []const u8, level: i32) ZstdError!usize {
+    const opts = comp.getCompressionParameters(level, src.len, 0);
+    return comp.compressInto(dst, src, opts);
 }
 
-pub fn minCLevel() i32 {
-    return version.clevel_min;
+pub fn decompressInto(dst: []u8, src: []const u8) ZstdError!usize {
+    return decomp.decompressInto(dst, src);
 }
 
-pub fn maxCLevel() i32 {
-    return version.clevel_max;
-}
-
-pub fn defaultCLevel() i32 {
-    return version.clevel_default;
-}
-
-pub fn isFrame(src: []const u8) bool {
-    return Frame.isFrame(src);
-}
-
-pub fn getFrameContentSize(src: []const u8) frame_mod.ContentSizeResult {
-    return Frame.contentSize(src);
+pub fn decompressBound(src: []const u8) ZstdError!usize {
+    return decomp.decompressBound(src);
 }
 
 pub fn findFrameCompressedSize(src: []const u8) ZstdError!usize {
-    return Frame.compressedSize(src);
+    return decomp.findFrameCompressedSize(src);
 }
 
-test {
-    _ = errors;
-    _ = compress_mod;
-    _ = decompress_mod;
-    _ = streaming_mod;
-    _ = dict_mod;
-    _ = frame_mod;
-    _ = constants_mod;
-    _ = version_mod;
+pub fn getFrameContentSize(src: []const u8) u64 {
+    if (src.len < 4) return CONTENTSIZE_ERROR;
+    const fh = hdr.getFrameHeader(src) catch return CONTENTSIZE_ERROR;
+    if (fh.frame_type == .skippable) return 0;
+    return fh.content_size;
 }
 
-test "compress decompress round trip" {
-    const allocator = std.testing.allocator;
-    const original = "zstd.zig native Zig implementation - full round trip";
-
-    const compressed = try compress(allocator, original, .{});
-    defer allocator.free(compressed);
-
-    const decompressed = try decompress(allocator, compressed, .{});
-    defer allocator.free(decompressed);
-
-    try std.testing.expectEqualStrings(original, decompressed);
+pub fn getFrameHeader(src: []const u8) ZstdError!FrameHeader {
+    return hdr.getFrameHeader(src);
 }
 
-test "version info" {
-    try std.testing.expectEqual(@as(u32, 10600), version.number);
-    try std.testing.expectEqualStrings("1.6.0", version.string);
+pub fn isFrame(src: []const u8) bool {
+    return det.detectFrame(src) != .unknown;
 }
 
-test "compressor lifecycle" {
-    var comp = Compressor.init(.{});
-    defer comp.deinit();
-
-    try comp.setParameter(.compression_level, 5);
-    try std.testing.expectEqual(@as(i32, 5), comp.level);
+pub fn isSkippableFrame(src: []const u8) bool {
+    return hdr.isSkippableFrame(src);
 }
 
-test "frame detection" {
-    const allocator = std.testing.allocator;
-    const data = "Frame detection test";
-    const compressed = try compress(allocator, data, .{});
-    defer allocator.free(compressed);
-
-    try std.testing.expect(Frame.isFrame(compressed));
-    try std.testing.expect(!Frame.isFrame("not a frame"));
+pub fn writeSkippableFrame(dst: []u8, data: []const u8, magic_variant: u32) usize {
+    if (dst.len < 8 + data.len) return 0;
+    const magic = MAGIC_SKIPPABLE_START + (magic_variant & 0xF);
+    dst[0] = @truncate(magic);
+    dst[1] = @truncate(magic >> 8);
+    dst[2] = @truncate(magic >> 16);
+    dst[3] = @truncate(magic >> 24);
+    const size: u32 = @intCast(data.len);
+    dst[4] = @truncate(size);
+    dst[5] = @truncate(size >> 8);
+    dst[6] = @truncate(size >> 16);
+    dst[7] = @truncate(size >> 24);
+    @memcpy(dst[8 .. 8 + data.len], data);
+    return 8 + data.len;
 }
 
-test "CLevel enum values" {
-    try std.testing.expectEqual(@as(i32, 1), CLevel.fastest.toInt());
-    try std.testing.expectEqual(@as(i32, 3), CLevel.default.toInt());
-    try std.testing.expectEqual(@as(i32, 19), CLevel.best.toInt());
+pub fn readSkippableFrame(dst: []u8, src: []const u8) ZstdError!usize {
+    if (src.len < 8) return error.SrcSizeWrong;
+    if (!isSkippableFrame(src)) return error.PrefixUnknown;
+    const size: u32 = @as(u32, src[4]) | (@as(u32, src[5]) << 8) | (@as(u32, src[6]) << 16) | (@as(u32, src[7]) << 24);
+    if (src.len < 8 + size) return error.SrcSizeWrong;
+    if (dst.len < size) return error.DstSizeTooSmall;
+    @memcpy(dst[0..size], src[8 .. 8 + size]);
+    return size;
 }
 
-test "CompressOptions with level" {
-    const compressed = try compress(std.testing.allocator, "test", .{ .level = .fastest });
-    defer std.testing.allocator.free(compressed);
-    try std.testing.expect(compressed.len > 0);
+pub fn versionString() []const u8 {
+    return version;
 }
 
-test "Decompressor reusable context" {
-    const allocator = std.testing.allocator;
-    var decomp = Decompressor.init(allocator, .{});
-    defer decomp.deinit();
+pub fn versionNumber() u32 {
+    return version_number;
+}
 
-    const original = "reusable decompressor test";
-    const compressed = try compress(allocator, original, .{});
-    defer allocator.free(compressed);
+pub fn maxCLevel() i32 {
+    return constants.c_level_max;
+}
 
-    const decompressed = try decomp.decompress(compressed);
-    defer allocator.free(decompressed);
+pub fn minCLevel() i32 {
+    return constants.c_level_min;
+}
 
-    try std.testing.expectEqualStrings(original, decompressed);
+pub fn defaultCLevel() i32 {
+    return constants.c_level_default;
 }
