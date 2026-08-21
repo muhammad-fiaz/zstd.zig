@@ -37,10 +37,10 @@ This corresponds to `build.zig.zon` version `0.0.2`:
 
 ### Method 2: Zig Fetch (Main Branch)
 
-Use the latest development version from the `dev` branch:
+Use the latest development version from the `main` branch:
 
 ```bash
-zig fetch --save git+https://github.com/muhammad-fiaz/zstd.zig.git#dev
+zig fetch --save git+https://github.com/muhammad-fiaz/zstd.zig.git
 ```
 
 ### Method 3: Manual `build.zig.zon` Configuration

@@ -30,14 +30,22 @@ Run all at once:
 zig build run-all-examples
 ```
 
-## Detailed Guides
+## Per-Example Client-Side Guides (code + output + explanation)
 
-| Guide | Description |
-|---------|-------------|
-| [Basic Compression](/examples/basic) | One-shot compress/decompress, levels, `CompressionContext`, `compressBound` |
-| [Streaming](/examples/streaming) | `StreamingCompressor`/`StreamingDecompressor` chunk-based processing |
-| [Dictionary](/examples/dictionary) | `Dictionary` / `DictionaryBuilder` APIs |
-| [Frame Inspection](/examples/frame) | `isFrame`, `getFrameHeader`, `getFrameContentSize`, `findFrameCompressedSize`, `isSkippableFrame` |
+| Guide | Example File | Client-Side Focus |
+|---------|--------------|-------------------|
+| [Basic Compression](/examples/basic_compression) | `basic_compression.zig` | `compress`/`decompress` round-trip, ratio, `std.debug.print` |
+| [Basic Decompression](/examples/basic_decompression) | `basic_decompression.zig` | `decompress` verification, `std.mem.eql` |
+| [Custom Level](/examples/custom_level) | `custom_level.zig` | `compressWithLevel` 1-22, `minCLevel`/`maxCLevel` |
+| [Advanced Params](/examples/advanced_params) | `advanced_params.zig` | `getCompressionParameters`, `checksum`, `window_log`, `strategy` |
+| [Dictionary Compression](/examples/dictionary_compression) | `dictionary_compression.zig` | `createDictionaryFromData`, `dictId`, `CompressionOptions.dict_id` |
+| [Dictionary Training](/examples/dictionary_training) | `dictionary_training.zig` | `DictionaryBuilder.train`/`trainCover`/`trainFastCover` |
+| [Streaming Compression](/examples/streaming_compression) | `streaming_compression.zig` | `StreamingCompressor`, `EndDirective`, `remaining` |
+| [Streaming Decompression](/examples/streaming_decompression) | `streaming_decompression.zig` | `StreamingDecompressor`, `needs_more`, chunked `64B` |
+| [Custom Allocator](/examples/custom_allocator) | `custom_allocator.zig` | `TrackingAllocator`, `allocated`/`allocs`/`frees` |
+| [Error Handling](/examples/error_handling) | `error_handling.zig` | `PrefixUnknown`, `SrcSizeWrong`, `DstSizeTooSmall` |
+| [Legacy Decompression](/examples/legacy_decompression) | `legacy_decompression.zig` | `legacy.isLegacy`, `legacyVersion`, `isFrame`, skippable |
+| [File Compression](/examples/file_compression) | `file_compression.zig` | `std.Io.Dir` file → `.zst` → restore, `writeFile`/`openFile`/`stat` |
 
 ## Validate
 
