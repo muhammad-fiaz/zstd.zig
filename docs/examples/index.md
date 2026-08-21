@@ -5,9 +5,9 @@ description: Code examples for zstd.zig compression library.
 
 # Examples
 
-Practical examples showing how to use zstd.zig. All 11 examples live in `examples/` with `_` names and are run via `zig build run-<name>`.
+Practical examples showing how to use zstd.zig. All 12 examples live in `examples/` with `_` names and are run via `zig build run-<name>`.
 
-## All 11 Examples
+## All 12 Examples
 
 | Example | File | Description | Run Command |
 |---------|------|-------------|-------------|
@@ -22,6 +22,7 @@ Practical examples showing how to use zstd.zig. All 11 examples live in `example
 | `custom_allocator` | `examples/custom_allocator.zig` | Custom `TrackingAllocator` tracking | `zig build run-custom_allocator` |
 | `error_handling` | `examples/error_handling.zig` | Corruption, truncation, and buffer error cases | `zig build run-error_handling` |
 | `legacy_decompression` | `examples/legacy_decompression.zig` | Legacy frame detection for v01-v07 (`zstd.legacy`) and skippable frames | `zig build run-legacy_decompression` |
+| `file_compression` | `examples/file_compression.zig` | Real file compression, write to .zst archive, and decompression | `zig build run-file_compression` |
 
 Run all at once:
 

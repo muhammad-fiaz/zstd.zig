@@ -13,8 +13,12 @@ build/
 tmp/
 *.zst
 *.tmp
+example_input.txt
+example_output.txt.zst
+example_restored.txt
+
 # IDE
 .vscode/
 .idea/
 *.swp
-*~
+*~

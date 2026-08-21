@@ -503,3 +503,62 @@ test "block type raw detection" {
     try std.testing.expectEqual(zstd.BlockType.compressed, @as(zstd.BlockType, .compressed));
     try std.testing.expectEqual(zstd.BlockType.reserved, @as(zstd.BlockType, .reserved));
 }
+
+test "interoperability frame format magic and single segment" {
+    const alloc = std.testing.allocator;
+    const payload = "Interoperability standard zstd frame test";
+    const comp = try zstd.compress(alloc, payload);
+    defer alloc.free(comp);
+
+    // Validate standard zstd magic number (0xFD2FB528 in little-endian)
+    try std.testing.expect(comp.len >= 4);
+    const magic = @as(u32, comp[0]) | (@as(u32, comp[1]) << 8) | (@as(u32, comp[2]) << 16) | (@as(u32, comp[3]) << 24);
+    try std.testing.expectEqual(@as(u32, 0xFD2FB528), magic);
+
+    // Validate frame header is valid
+    const fh = try zstd.getFrameHeader(comp);
+    try std.testing.expectEqual(zstd.FrameHeader{
+        .frame_type = .regular,
+        .header_size = fh.header_size,
+        .window_size = fh.window_size,
+        .block_size_max = fh.block_size_max,
+        .dict_id = 0,
+        .checksum_flag = false,
+        .content_size = payload.len,
+    }, fh);
+
+    // Validate round trip
+    const decomp = try zstd.decompress(alloc, comp);
+    defer alloc.free(decomp);
+    try std.testing.expectEqualStrings(payload, decomp);
+}
+
+test "interoperability RLE block generation and decompression" {
+    const alloc = std.testing.allocator;
+    // 500 repeated bytes trigger standard RLE block encoding
+    const rep_data = [_]u8{'X'} ** 500;
+    const comp = try zstd.compress(alloc, &rep_data);
+    defer alloc.free(comp);
+
+    // Should compress very small due to RLE block header + 1 byte
+    try std.testing.expect(comp.len < 20);
+
+    const decomp = try zstd.decompress(alloc, comp);
+    defer alloc.free(decomp);
+    try std.testing.expectEqualSlices(u8, &rep_data, decomp);
+}
+
+test "interoperability checksummed frame validation" {
+    const alloc = std.testing.allocator;
+    const payload = "Checksummed frame format test payload";
+    const comp = try zstd.compressWithOptions(alloc, payload, .{ .checksum = true });
+    defer alloc.free(comp);
+
+    const fh = try zstd.getFrameHeader(comp);
+    try std.testing.expect(fh.checksum_flag);
+
+    const decomp = try zstd.decompress(alloc, comp);
+    defer alloc.free(decomp);
+    try std.testing.expectEqualStrings(payload, decomp);
+}
+

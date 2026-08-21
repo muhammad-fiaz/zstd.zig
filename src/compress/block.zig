@@ -18,14 +18,6 @@ pub fn compressBlock(dst: []u8, src: []const u8, is_last: bool) errors.ZstdError
         dst[3] = src[0];
         return 4;
     }
-    if (dst.len >= 3) {
-        if (tryCompress(dst[3..], src)) |c_len| {
-            if (c_len < src.len) {
-                frame_block.writeBlockHeader(dst[0..3], is_last, .compressed, @intCast(c_len));
-                return 3 + c_len;
-            }
-        }
-    }
     const bound = src.len + 3;
     if (dst.len < bound) return error.DstSizeTooSmall;
     frame_block.writeBlockHeader(dst[0..3], is_last, .raw, @intCast(src.len));

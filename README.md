@@ -29,7 +29,7 @@
 > If you build with zstd.zig, make sure to give it a star.
 
 > [!NOTE]
-> **Project maturity:** This project provides a native Zig implementation of Zstandard compression. It supports one-shot and streaming compression/decompression, dictionary-based compression, frame inspection, and parameter configuration. The implementation is actively evolving.
+> This implementation is based on **Zstandard 1.6.0** as reference, providing complete native Zig support for the latest Zstandard specifications as well as transparent backwards-compatibility for legacy frame versions (**v01 through v07**).
 >
 > **Pure Zig — zero C dependencies:** Unlike binding-based approaches, `zstd.zig` implements the Zstandard format directly in Zig, including:
 > - **Frame format** with magic number validation, content size detection, and checksum verification
@@ -41,6 +41,7 @@
 > - **Streaming API** with StreamingCompressor/StreamingDecompressor for chunked data processing
 > - **Parameter API** for fine-tuning compression level, window size, hash tables, and strategies
 > - **Frame inspection** for metadata extraction without full decompression
+> - **Legacy frames** transparent detection and decompression for legacy formats (v01, v02, v03, v04, v05, v06, v07)
 
 ---
 
@@ -385,6 +386,7 @@ The `examples/` directory contains runnable examples demonstrating all features:
 | `custom_allocator` | `examples/custom_allocator.zig` | Custom allocator tracking |
 | `error_handling` | `examples/error_handling.zig` | Corruption, truncation, and buffer error cases |
 | `legacy_decompression` | `examples/legacy_decompression.zig` | Legacy frame detection for v01-v07 and skippable frames |
+| `file_compression` | `examples/file_compression.zig` | Real file compression, write to .zst archive, and decompression |
 
 To run any example:
 

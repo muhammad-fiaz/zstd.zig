@@ -137,3 +137,49 @@ const bound = zstd.compressBound(src.len);
 var buf = try allocator.alloc(u8, bound);
 defer allocator.free(buf);
 ```
+
+## File Compression (`examples/file_compression.zig`)
+
+```zig
+const std = @import("std");
+const zstd = @import("zstd");
+const Dir = std.Io.Dir;
+
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
+    const cwd = Dir.cwd();
+
+    // 1. Write source file
+    try cwd.writeFile(io, .{ .sub_path = "input.txt", .data = "Hello Zstandard!", .flags = .{ .truncate = true } });
+
+    // 2. Read, compress, write .zst archive
+    var in_file = try cwd.openFile(io, "input.txt", .{});
+    defer in_file.close(io);
+    const in_stat = try in_file.stat(io);
+    const in_data = try allocator.alloc(u8, @intCast(in_stat.size));
+    defer allocator.free(in_data);
+    _ = try in_file.readPositionalAll(io, in_data, 0);
+
+    const compressed = try zstd.compress(allocator, in_data);
+    defer allocator.free(compressed);
+    try cwd.writeFile(io, .{ .sub_path = "output.txt.zst", .data = compressed, .flags = .{ .truncate = true } });
+
+    // 3. Read .zst archive, decompress, write restored file
+    var comp_file = try cwd.openFile(io, "output.txt.zst", .{});
+    defer comp_file.close(io);
+    const comp_stat = try comp_file.stat(io);
+    const comp_data = try allocator.alloc(u8, @intCast(comp_stat.size));
+    defer allocator.free(comp_data);
+    _ = try comp_file.readPositionalAll(io, comp_data, 0);
+
+    const decompressed = try zstd.decompress(allocator, comp_data);
+    defer allocator.free(decompressed);
+    try cwd.writeFile(io, .{ .sub_path = "restored.txt", .data = decompressed, .flags = .{ .truncate = true } });
+}
+```
+
+```bash
+zig build run-file_compression
+```
+
