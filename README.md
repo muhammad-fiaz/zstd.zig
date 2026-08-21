@@ -400,7 +400,7 @@ zig build test -Dtarget=aarch64-macos
 
 ```bash
 zig build                    # Build library
-zig build test               # Run all tests (41+)
+zig build test               # Run all tests (44)
 zig build run-all-examples   # Run all 9 examples
 zig build docs               # Generate documentation site
 ```
