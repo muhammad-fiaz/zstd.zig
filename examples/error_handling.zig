@@ -1,39 +1,39 @@
-const zstd = @import("zstd");
 const std = @import("std");
+const zstd = @import("zstd");
 
 pub fn main() !void {
-    const gpa = std.heap.page_allocator;
-
-    const original = "Error handling example for zstd.";
-    const compressed = try zstd.compress(gpa, original, 3);
-    defer gpa.free(compressed);
-
-    std.debug.print("Version: {s}\n", .{zstd.version.versionString()});
-    std.debug.print("Version number: {d}\n", .{zstd.version.versionNumber()});
-    std.debug.print("Min compression level: {d}\n", .{zstd.version.minCLevel()});
-    std.debug.print("Max compression level: {d}\n", .{zstd.version.maxCLevel()});
-    std.debug.print("Default compression level: {d}\n", .{zstd.version.defaultCLevel()});
-
-    const cs = zstd.getFrameContentSize(compressed);
-    switch (cs) {
-        .known => |size| std.debug.print("Content size: {d}\n", .{size}),
-        .unknown => std.debug.print("Content size: unknown\n", .{}),
-        .@"error" => std.debug.print("Content size: error\n", .{}),
-    }
-
-    var dctx = try zstd.Decompressor.init();
-    defer dctx.deinit();
-
-    const garbage = "this is not valid zstd data";
-    const buf = try gpa.alloc(u8, 256);
-    defer gpa.free(buf);
-
-    const result = dctx.decompress(buf, garbage);
-    if (result) |written| {
-        std.debug.print("Unexpected success: {d} bytes\n", .{written});
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    const good = try zstd.compress(allocator, "valid data");
+    defer allocator.free(good);
+    var bad = try allocator.dupe(u8, good);
+    defer allocator.free(bad);
+    bad[0] ^= 0xFF;
+    const result = zstd.decompress(allocator, bad);
+    if (result) |data| {
+        defer allocator.free(data);
+        std.debug.print("Unexpected success: {d} bytes\n", .{data.len});
+        return error.TestFailed;
     } else |err| {
-        std.debug.print("Expected error: {any}\n", .{err});
+        std.debug.print("Correctly caught error: {s}\n", .{@errorName(err)});
     }
-
+    const truncated = good[0 .. good.len / 2];
+    const r2 = zstd.decompress(allocator, truncated);
+    if (r2) |data| {
+        defer allocator.free(data);
+        std.debug.print("Unexpected success on truncated\n", .{});
+        return error.TestFailed;
+    } else |err| {
+        std.debug.print("Truncated correctly failed: {s}\n", .{@errorName(err)});
+    }
+    var small: [2]u8 = undefined;
+    const r3 = zstd.decompressInto(&small, good);
+    if (r3) |sz| {
+        std.debug.print("Unexpected success small buf {d}\n", .{sz});
+        return error.TestFailed;
+    } else |err| {
+        std.debug.print("Small buffer correctly failed: {s}\n", .{@errorName(err)});
+    }
     std.debug.print("Error handling example complete\n", .{});
 }

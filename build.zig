@@ -4,95 +4,12 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const legacy = b.option(bool, "legacy", "Enable legacy format decoding (v0.1-v0.7)") orelse false;
-    const multithread = b.option(bool, "multithread", "Enable multithreaded compression (ZSTD_MULTITHREAD)") orelse true;
-
     const zstd_mod = b.addModule("zstd", .{
         .root_source_file = b.path("src/zstd.zig"),
         .target = target,
         .optimize = optimize,
-        .link_libc = true,
+        .link_libc = false,
     });
-
-    zstd_mod.addCSourceFiles(.{
-        .root = b.path(""),
-        .files = &.{
-            "lib/common/debug.c",
-            "lib/common/entropy_common.c",
-            "lib/common/error_private.c",
-            "lib/common/fse_decompress.c",
-            "lib/common/pool.c",
-            "lib/common/threading.c",
-            "lib/common/xxhash.c",
-            "lib/common/zstd_common.c",
-        },
-        .flags = &.{"-DZSTD_STATIC_LINKING_ONLY"},
-    });
-
-    zstd_mod.addCSourceFiles(.{
-        .root = b.path(""),
-        .files = &.{
-            "lib/compress/fse_compress.c",
-            "lib/compress/hist.c",
-            "lib/compress/huf_compress.c",
-            "lib/compress/zstd_compress.c",
-            "lib/compress/zstd_compress_literals.c",
-            "lib/compress/zstd_compress_sequences.c",
-            "lib/compress/zstd_compress_superblock.c",
-            "lib/compress/zstd_double_fast.c",
-            "lib/compress/zstd_fast.c",
-            "lib/compress/zstd_lazy.c",
-            "lib/compress/zstd_ldm.c",
-            "lib/compress/zstd_opt.c",
-            "lib/compress/zstd_preSplit.c",
-            "lib/compress/zstdmt_compress.c",
-        },
-        .flags = &.{ "-DZSTD_STATIC_LINKING_ONLY", "-DZSTD_DISABLE_DEPRECATE_WARNINGS" },
-    });
-
-    zstd_mod.addCSourceFiles(.{
-        .root = b.path(""),
-        .files = &.{
-            "lib/decompress/huf_decompress.c",
-            "lib/decompress/zstd_ddict.c",
-            "lib/decompress/zstd_decompress.c",
-            "lib/decompress/zstd_decompress_block.c",
-        },
-        .flags = &.{ "-DZSTD_STATIC_LINKING_ONLY", "-DZSTD_DISABLE_ASM" },
-    });
-
-    zstd_mod.addCSourceFiles(.{
-        .root = b.path(""),
-        .files = &.{
-            "lib/dictBuilder/cover.c",
-            "lib/dictBuilder/divsufsort.c",
-            "lib/dictBuilder/fastcover.c",
-            "lib/dictBuilder/zdict.c",
-        },
-        .flags = &.{"-DZSTD_STATIC_LINKING_ONLY"},
-    });
-
-    if (legacy) {
-        zstd_mod.addCSourceFiles(.{
-            .root = b.path(""),
-            .files = &.{
-                "lib/legacy/zstd_v01.c",
-                "lib/legacy/zstd_v02.c",
-                "lib/legacy/zstd_v03.c",
-                "lib/legacy/zstd_v04.c",
-                "lib/legacy/zstd_v05.c",
-                "lib/legacy/zstd_v06.c",
-                "lib/legacy/zstd_v07.c",
-            },
-            .flags = &.{ "-DZSTD_STATIC_LINKING_ONLY", "-DZSTD_LEGACY_SUPPORT" },
-        });
-    }
-
-    zstd_mod.addIncludePath(b.path("lib"));
-
-    if (multithread) {
-        zstd_mod.addCMacro("ZSTD_MULTITHREAD", "1");
-    }
 
     const lib = b.addLibrary(.{
         .name = "zstd",
@@ -101,12 +18,48 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(lib);
 
-    const test_step = b.step("test", "Run unit tests");
+    const test_step = b.step("test", "Run all tests");
     const tests = b.addTest(.{
         .root_module = zstd_mod,
     });
     const run_tests = b.addRunArtifact(tests);
     test_step.dependOn(&run_tests.step);
+
+    const test_files = [_]struct { name: []const u8, file: []const u8 }{
+        .{ .name = "integration", .file = "tests/integration.zig" },
+        .{ .name = "common", .file = "tests/common.zig" },
+        .{ .name = "frame", .file = "tests/frame.zig" },
+        .{ .name = "fse", .file = "tests/fse.zig" },
+        .{ .name = "huffman", .file = "tests/huffman.zig" },
+        .{ .name = "compress", .file = "tests/compress.zig" },
+        .{ .name = "decompress", .file = "tests/decompress.zig" },
+        .{ .name = "streaming", .file = "tests/streaming.zig" },
+        .{ .name = "dictionary", .file = "tests/dictionary.zig" },
+        .{ .name = "legacy", .file = "tests/legacy.zig" },
+    };
+
+    const internal_mod = b.createModule(.{
+        .root_source_file = b.path("src/internal.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    inline for (test_files) |tf| {
+        const test_mod = b.createModule(.{
+            .root_source_file = b.path(tf.file),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zstd", .module = zstd_mod },
+                .{ .name = "internal", .module = internal_mod },
+            },
+        });
+        const tf_test = b.addTest(.{
+            .root_module = test_mod,
+        });
+        const tf_run = b.addRunArtifact(tf_test);
+        test_step.dependOn(&tf_run.step);
+    }
 
     const docs_step = b.step("docs", "Generate documentation");
     const docs = b.addTest(.{
@@ -119,60 +72,44 @@ pub fn build(b: *std.Build) void {
     });
     docs_step.dependOn(&install_docs.step);
 
-    const example_names = .{
-        "simple-compress",
-        "compress-bound",
-        "frame-content-size",
-        "cctx-parameters",
-        "multithreaded-compress",
-        "dctx-parameters",
-        "streaming-compress-file",
-        "streaming-decompress-file",
-        "dictionary-compress",
-        "dictionary-decompress",
-        "dictionary-training",
-        "error-handling",
-        "benchmark-levels",
+    const examples = [_]struct { name: []const u8, file: []const u8 }{
+        .{ .name = "basic_compression", .file = "examples/basic_compression.zig" },
+        .{ .name = "basic_decompression", .file = "examples/basic_decompression.zig" },
+        .{ .name = "custom_level", .file = "examples/custom_level.zig" },
+        .{ .name = "advanced_params", .file = "examples/advanced_params.zig" },
+        .{ .name = "dictionary_compression", .file = "examples/dictionary_compression.zig" },
+        .{ .name = "dictionary_training", .file = "examples/dictionary_training.zig" },
+        .{ .name = "streaming_compression", .file = "examples/streaming_compression.zig" },
+        .{ .name = "streaming_decompression", .file = "examples/streaming_decompression.zig" },
+        .{ .name = "custom_allocator", .file = "examples/custom_allocator.zig" },
+        .{ .name = "error_handling", .file = "examples/error_handling.zig" },
+        .{ .name = "legacy_decompression", .file = "examples/legacy_decompression.zig" },
+        .{ .name = "file_compression", .file = "examples/file_compression.zig" },
     };
 
-    inline for (example_names) |name| {
-        addExample(b, zstd_mod, name, "examples/" ++ comptime nameToFilename(name));
+    const run_all = b.step("run-all-examples", "Run all examples");
+
+    inline for (examples) |example| {
+        const run_step = b.step(
+            "run-" ++ example.name,
+            "Run " ++ example.name ++ " example",
+        );
+
+        const exe = b.addExecutable(.{
+            .name = "example-" ++ example.name,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(example.file),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{
+                    .{ .name = "zstd", .module = zstd_mod },
+                },
+            }),
+        });
+
+        const run_exe = b.addRunArtifact(exe);
+        run_step.dependOn(&run_exe.step);
+        run_all.dependOn(&run_exe.step);
+        run_exe.step.dependOn(&lib.step);
     }
-}
-
-fn nameToFilename(comptime name: []const u8) []const u8 {
-    var buf: [64]u8 = undefined;
-    var len: usize = 0;
-    for (name) |c| {
-        if (c == '-') {
-            buf[len] = '_';
-        } else {
-            buf[len] = c;
-        }
-        len += 1;
-    }
-    return buf[0..len] ++ ".zig";
-}
-
-fn addExample(b: *std.Build, zstd_mod: *std.Build.Module, comptime name: []const u8, comptime src: []const u8) void {
-    const exe_mod = b.createModule(.{
-        .root_source_file = b.path(src),
-        .target = zstd_mod.resolved_target,
-        .optimize = zstd_mod.optimize,
-        .imports = &.{
-            .{ .name = "zstd", .module = zstd_mod },
-        },
-    });
-    const exe = b.addExecutable(.{
-        .name = name,
-        .root_module = exe_mod,
-    });
-    b.installArtifact(exe);
-
-    const run_cmd = b.addRunArtifact(exe);
-    run_cmd.step.dependOn(b.getInstallStep());
-
-    const step_name = b.fmt("example-{s}", .{name});
-    const run_step = b.step(step_name, b.fmt("Run example: {s}", .{name}));
-    run_step.dependOn(&run_cmd.step);
 }

@@ -1,111 +1,152 @@
-//! # zstd.zig - High-Level Zig Bindings for Zstandard
-//!
-//! Complete, idiomatic, high-level native Zig bindings for the zstd (Zstandard)
-//! compression library v1.6.0. This library wraps the full Facebook/Meta zstd
-//! C API surface through safe, well-documented Zig APIs.
-//!
-//! Requires Zig 0.16.0 or later.
-//!
-//! ## Quick Start
-//!
-//! ```zig
-//! const zstd = @import("zstd");
-//!
-//! fn compressExample(allocator: std.mem.Allocator) !void {
-//!     const data = "Hello, zstd from Zig!";
-//!     const compressed = try zstd.compress(allocator, data, 3);
-//!     defer allocator.free(compressed);
-//!
-//!     const decompressed = try zstd.decompress(allocator, compressed, data.len);
-//!     defer allocator.free(decompressed);
-//!
-//!     std.debug.print("Compressed {d} -> {d} bytes\n", .{ data.len, compressed.len });
-//! }
-//! ```
-//!
-//! ## API Modules
-//!
-//! - `errors` - Unified Zig error set for all zstd error codes
-//! - `version` - Library version and capability queries
-//! - `simple` - One-shot compress/decompress functions
-//! - `cctx` - Explicit compression context (`Compressor`) with parameter tuning
-//! - `dctx` - Explicit decompression context (`Decompressor`) with parameter tuning
-//! - `stream` - Streaming compression/decompression for large data
-//! - `dict` - Dictionary compression/decompression with `CDict` and `DDict`
-//! - `zdict` - Dictionary builder for training dictionaries from sample data
-//!
-//! ## Building
-//!
-//! Add this package as a dependency in your `build.zig.zon`, then import it
-//! in your `build.zig`:
-//!
-//! ```zig
-//! const zstd_dep = b.dependency("zstd", .{});
-//! exe.root_module.addImport("zstd", zstd_dep.module("zstd"));
-//! ```
+pub const version = "1.6.0";
+pub const version_number: u32 = 1 * 100 * 100 + 6 * 100 + 0;
 
 const std = @import("std");
+const comp = @import("compress/compress.zig");
+const decomp = @import("decompress/decompress.zig");
+const hdr = @import("frame/header.zig");
+const det = @import("frame/detect.zig");
+const dictionary = @import("dictionary/dictionary.zig");
+const bld = @import("dictionary/builder.zig");
+const streamComp = @import("streaming/compress.zig");
+const streamDecomp = @import("streaming/decompress.zig");
+const cctx = @import("compress/context.zig");
+const dctx = @import("decompress/context.zig");
+const constants = @import("common/constants.zig");
+const errors = @import("common/errors.zig");
+const types = @import("common/types.zig");
+pub const legacy = @import("legacy/decoder.zig");
+pub const legacy_detect = @import("legacy/detect.zig");
 
-/// Error handling and error code mapping.
-pub const errors = @import("errors.zig");
-
-/// Library version and capability information.
-pub const version = @import("version.zig");
-
-/// One-shot compression and decompression API.
-pub const simple = @import("simple.zig");
-
-/// Explicit compression context API.
-pub const cctx = @import("cctx.zig");
-
-/// Explicit decompression context API.
-pub const dctx = @import("dctx.zig");
-
-/// Streaming compression and decompression API.
-pub const stream = @import("stream.zig");
-
-/// Dictionary compression and decompression API.
-pub const dict = @import("dict.zig");
-
-/// Dictionary builder API (ZDICT).
-pub const zdict = @import("zdict.zig");
-
-// Re-export key types at top level for convenience
+pub const CompressionOptions = comp.CompressionOptions;
+pub const DecompressionOptions = dctx.DecompressionOptions;
+pub const CompressionContext = cctx.CompressionContext;
+pub const DecompressionContext = dctx.DecompressionContext;
+pub const Dictionary = dictionary.Dictionary;
+pub const DictionaryBuilder = bld.DictionaryBuilder;
+pub const DictBuilderParams = bld.DictBuilderParams;
+pub const StreamingCompressor = streamComp.StreamingCompressor;
+pub const StreamingDecompressor = streamDecomp.StreamingDecompressor;
+pub const CStream = streamComp.CStream;
+pub const DStream = streamDecomp.DStream;
+pub const EndDirective = streamComp.EndDirective;
+pub const FrameHeader = types.FrameHeader;
+pub const BlockType = types.BlockType;
+pub const BlockProperties = types.BlockProperties;
 pub const ZstdError = errors.ZstdError;
-pub const Compressor = cctx.Compressor;
-pub const Decompressor = dctx.Decompressor;
-pub const CDict = cctx.CDict;
-pub const DDict = dctx.DDict;
-pub const CParameter = cctx.CParameter;
-pub const DParameter = dctx.DParameter;
-pub const Strategy = cctx.Strategy;
-pub const ResetDirective = cctx.ResetDirective;
-pub const EndDirective = stream.EndDirective;
-pub const StreamingCompressor = stream.StreamingCompressor;
-pub const StreamingDecompressor = stream.StreamingDecompressor;
-pub const ContentSizeResult = simple.ContentSizeResult;
-pub const DictParams = zdict.DictParams;
+pub const Strategy = constants.Strategy;
+pub const FrameOptions = struct { checksum: bool = false, content_size: ?u64 = null, dict_id: u32 = 0, window_log: u8 = 0 };
 
-// Re-export convenience functions at top level
-pub const compress = simple.compress;
-pub const decompress = simple.decompress;
-pub const compressBound = simple.compressBound;
-pub const getFrameContentSize = simple.getFrameContentSize;
-pub const findFrameCompressedSize = simple.findFrameCompressedSize;
-pub const isFrame = simple.isFrame;
-pub const versionNumber = version.versionNumber;
-pub const versionString = version.versionString;
-pub const minCLevel = version.minCLevel;
-pub const maxCLevel = version.maxCLevel;
-pub const defaultCLevel = version.defaultCLevel;
+pub const MAGICNUMBER = constants.magic_number;
+pub const MAGIC_DICTIONARY = constants.magic_dictionary;
+pub const MAGIC_SKIPPABLE_START = constants.magic_skippable_start;
+pub const MAGIC_SKIPPABLE_MASK = constants.magic_skippable_mask;
+pub const BLOCKSIZE_MAX = constants.block_size_max;
+pub const CONTENTSIZE_UNKNOWN = constants.contentsize_unknown;
+pub const CONTENTSIZE_ERROR = constants.contentsize_error;
+pub const CLEVEL_DEFAULT = constants.c_level_default;
+pub const MAX_INPUT_SIZE = constants.max_input_size;
 
-test {
-    _ = errors;
-    _ = version;
-    _ = simple;
-    _ = cctx;
-    _ = dctx;
-    _ = stream;
-    _ = dict;
-    _ = zdict;
+pub const compressBound = comp.compressBound;
+pub const getCompressionParameters = comp.getCompressionParameters;
+pub const loadDictionary = dictionary.loadDictionary;
+pub const createDictionaryFromData = dictionary.createDictionaryFromData;
+
+pub fn compress(allocator: std.mem.Allocator, src: []const u8) anyerror![]u8 {
+    return comp.compress(allocator, src, .{});
+}
+
+pub fn decompress(allocator: std.mem.Allocator, src: []const u8) anyerror![]u8 {
+    return decomp.decompress(allocator, src);
+}
+
+pub fn compressWithLevel(allocator: std.mem.Allocator, src: []const u8, level: i32) anyerror![]u8 {
+    const opts = comp.getCompressionParameters(level, src.len, 0);
+    return comp.compress(allocator, src, opts);
+}
+
+pub fn compressWithOptions(allocator: std.mem.Allocator, src: []const u8, options: CompressionOptions) anyerror![]u8 {
+    return comp.compress(allocator, src, options);
+}
+
+pub fn compressInto(dst: []u8, src: []const u8, level: i32) ZstdError!usize {
+    const opts = comp.getCompressionParameters(level, src.len, 0);
+    return comp.compressInto(dst, src, opts);
+}
+
+pub fn decompressInto(dst: []u8, src: []const u8) ZstdError!usize {
+    return decomp.decompressInto(dst, src);
+}
+
+pub fn decompressBound(src: []const u8) ZstdError!usize {
+    return decomp.decompressBound(src);
+}
+
+pub fn findFrameCompressedSize(src: []const u8) ZstdError!usize {
+    return decomp.findFrameCompressedSize(src);
+}
+
+pub fn getFrameContentSize(src: []const u8) u64 {
+    if (src.len < 4) return CONTENTSIZE_ERROR;
+    const fh = hdr.getFrameHeader(src) catch return CONTENTSIZE_ERROR;
+    if (fh.frame_type == .skippable) return 0;
+    return fh.content_size;
+}
+
+pub fn getFrameHeader(src: []const u8) ZstdError!FrameHeader {
+    return hdr.getFrameHeader(src);
+}
+
+pub fn isFrame(src: []const u8) bool {
+    return det.detectFrame(src) != .unknown;
+}
+
+pub fn isSkippableFrame(src: []const u8) bool {
+    return hdr.isSkippableFrame(src);
+}
+
+pub fn writeSkippableFrame(dst: []u8, data: []const u8, magic_variant: u32) usize {
+    if (dst.len < 8 + data.len) return 0;
+    const magic = MAGIC_SKIPPABLE_START + (magic_variant & 0xF);
+    dst[0] = @truncate(magic);
+    dst[1] = @truncate(magic >> 8);
+    dst[2] = @truncate(magic >> 16);
+    dst[3] = @truncate(magic >> 24);
+    const size: u32 = @intCast(data.len);
+    dst[4] = @truncate(size);
+    dst[5] = @truncate(size >> 8);
+    dst[6] = @truncate(size >> 16);
+    dst[7] = @truncate(size >> 24);
+    @memcpy(dst[8 .. 8 + data.len], data);
+    return 8 + data.len;
+}
+
+pub fn readSkippableFrame(dst: []u8, src: []const u8) ZstdError!usize {
+    if (src.len < 8) return error.SrcSizeWrong;
+    if (!isSkippableFrame(src)) return error.PrefixUnknown;
+    const size: u32 = @as(u32, src[4]) | (@as(u32, src[5]) << 8) | (@as(u32, src[6]) << 16) | (@as(u32, src[7]) << 24);
+    if (src.len < 8 + size) return error.SrcSizeWrong;
+    if (dst.len < size) return error.DstSizeTooSmall;
+    @memcpy(dst[0..size], src[8 .. 8 + size]);
+    return size;
+}
+
+pub fn versionString() []const u8 {
+    return version;
+}
+
+pub fn versionNumber() u32 {
+    return version_number;
+}
+
+pub fn maxCLevel() i32 {
+    return constants.c_level_max;
+}
+
+pub fn minCLevel() i32 {
+    return constants.c_level_min;
+}
+
+pub fn defaultCLevel() i32 {
+    return constants.c_level_default;
 }

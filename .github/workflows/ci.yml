@@ -2,50 +2,66 @@ name: CI
 
 on:
   push:
-    branches: [dev]
+    branches: [main, dev]
   pull_request:
-    branches: [dev]
+    branches: [main, dev]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
-      - run: zig build
-
   test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
-      - run: zig build test
-
-  examples:
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} / ${{ matrix.arch }} / Zig ${{ matrix.zig }}
     strategy:
+      fail-fast: false
       matrix:
-        example:
-          - simple-compress
-          - compress-bound
-          - frame-content-size
-          - cctx-parameters
-          - multithreaded-compress
-          - dctx-parameters
-          - streaming-compress-file
-          - streaming-decompress-file
-          - dictionary-compress
-          - dictionary-decompress
-          - dictionary-training
-          - error-handling
-          - benchmark-levels
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        arch: [x86_64, aarch64]
+        zig: ["0.16.0"]
+        include:
+          - os: ubuntu-latest
+            arch: x86
+            zig: "0.16.0"
+          - os: windows-latest
+            arch: x86
+            zig: "0.16.0"
+        exclude:
+          - os: macos-latest
+            arch: x86
+          - os: macos-latest
+            arch: x86_64
+            # macos x86_64 is covered via arm64 runner? keep one macos entry
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Zig ${{ matrix.zig }} (${{ matrix.arch }})
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ matrix.zig }}
+      - name: Install QEMU for cross tests (Linux)
+        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'aarch64'
+        run: sudo apt-get update && sudo apt-get install -y qemu-user-static qemu-user
+      - name: Install QEMU for cross tests (Windows)
+        if: matrix.os == 'windows-latest' && matrix.arch == 'aarch64'
+        run: choco install qemu -y
+      - name: Build
+        run: zig build -Dtarget=${{ matrix.arch }}-${{ fromJSON('{"ubuntu-latest":"linux","windows-latest":"windows","macos-latest":"macos"}')[matrix.os] }}
+      - name: Test
+        shell: bash
+        run: |
+          TARGET="${{ matrix.arch }}-${{ fromJSON('{"ubuntu-latest":"linux","windows-latest":"windows","macos-latest":"macos"}')[matrix.os] }}"
+          if [ "${{ matrix.arch }}" = "aarch64" ] && [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            zig build test -Dtarget=$TARGET --summary all -fqemu
+          elif [ "${{ matrix.arch }}" = "aarch64" ] && [ "${{ matrix.os }}" = "windows-latest" ]; then
+            # Windows aarch64 cross-compilation verification without emulation (QEMU user-mode for Windows PE not available)
+            zig build -Dtarget=$TARGET
+            echo "Cross build verified for $TARGET"
+          else
+            zig build test -Dtarget=$TARGET --summary all
+          fi
+
+  fmt:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.16.0
-      - run: zig build example-${{ matrix.example }}
+      - run: zig fmt --check src/
