@@ -5,24 +5,34 @@ test "huffman maxTableLog" {
     try std.testing.expectEqual(@as(u8, 11), i.huff_common.maxTableLog);
 }
 
-test "compressHuffman unsupported" {
+test "compressHuffman roundtrip" {
     var dst: [256]u8 = undefined;
-    const src = [_]u8{ 1, 2, 3 };
-    const result = i.huff_compress.compressHuffman(&dst, &src);
-    try std.testing.expectError(error.UnsupportedFeature, result);
+    const src = [_]u8{ 1, 2, 2, 3, 3, 3, 4, 4, 4, 4 };
+    const c_len = try i.huff_compress.compressHuffman(&dst, &src);
+    try std.testing.expect(c_len > 0);
+
+    var decompressed: [10]u8 = undefined;
+    const d_len = try i.huff_decompress.decompressHuffmanBlock(std.testing.allocator, &decompressed, dst[0..c_len]);
+    try std.testing.expectEqual(@as(usize, 10), d_len);
+    try std.testing.expectEqualSlices(u8, &src, &decompressed);
 }
 
-test "buildWeights unsupported" {
+
+
+
+test "buildWeights basic" {
     var weights: [256]u8 = undefined;
     const counts = [_]u32{ 10, 5, 3 };
-    const result = i.huff_compress.buildWeights(&weights, &counts, 2);
-    try std.testing.expectError(error.UnsupportedFeature, result);
+    const log = try i.huff_compress.buildWeights(&weights, &counts, 2);
+    try std.testing.expect(log > 0);
+    try std.testing.expect(weights[0] > 0);
 }
 
-test "buildTableFromWeights unsupported" {
+test "buildTableFromWeights basic" {
     const weights = [_]u8{ 4, 3, 2, 1 };
-    const result = i.huff_table.buildTableFromWeights(std.testing.allocator, &weights, 4);
-    try std.testing.expectError(error.UnsupportedFeature, result);
+    var tbl = try i.huff_table.buildTableFromWeights(std.testing.allocator, &weights, 4);
+    defer tbl.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u8, 4), tbl.max_bits);
 }
 
 test "buildDecoder simple" {
@@ -69,13 +79,6 @@ test "buildDecoder symbols populated" {
     try std.testing.expect(found[0]);
     try std.testing.expect(found[1]);
     try std.testing.expect(found[2]);
-}
-
-test "decompressHuffmanBlock unsupported" {
-    var dst: [4]u8 = undefined;
-    const src = [_]u8{0x00};
-    const result = i.huff_decompress.decompressHuffmanBlock(std.testing.allocator, &dst, &src);
-    try std.testing.expectError(error.UnsupportedFeature, result);
 }
 
 test "decompressHuffmanBlock empty" {

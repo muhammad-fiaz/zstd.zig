@@ -23,15 +23,15 @@ pub const strategy_max: u8 = 9;
 pub const c_level_default: i32 = 3;
 pub const c_level_min: i32 = -131072;
 pub const c_level_max: i32 = 22;
-pub const frame_header_size_min: usize = 5;
+pub const frame_header_size_min: usize = 6;
 pub const frame_header_size_max: usize = 18;
 pub const skippable_header_size: usize = 8;
 pub const block_header_size: usize = 3;
 pub const frame_checksum_size: usize = 4;
 pub const min_sequences_size: usize = 1;
 pub const max_input_size: usize = if (@sizeOf(usize) == 8) 0xFF00FF00FF00FF00 else 0xFF00FF00;
-pub const contentsize_unknown: u64 = 0xFFFFFFFFFFFFFFFF - 1;
-pub const contentsize_error: u64 = 0xFFFFFFFFFFFFFFFF - 2;
+pub const contentsize_unknown: u64 = 0xFFFFFFFFFFFFFFFF;
+pub const contentsize_error: u64 = 0xFFFFFFFFFFFFFFFF - 1;
 pub const rep_num: usize = 3;
 pub const rep_start_value = [3]u32{ 1, 4, 8 };
 pub const min_match: usize = 3;
@@ -46,6 +46,7 @@ pub const ml_fse_log: u8 = 9;
 pub const ll_fse_log: u8 = 9;
 pub const off_fse_log: u8 = 8;
 pub const max_fse_log: u8 = 9;
+pub const min_fse_log: u8 = 5;
 pub const max_ll_bits: u8 = 16;
 pub const max_ml_bits: u8 = 16;
 pub const long_nb_seq: usize = 0x7F00;
@@ -91,6 +92,35 @@ pub const of_default_norm = [29]i16{
     -1, -1, -1, -1, -1,
 };
 pub const of_default_norm_log: u32 = 5;
+
+pub const ll_base = [36]u32{
+    0,  1,  2,  3,  4,  5,  6,  7,
+    8,  9,  10, 11, 12, 13, 14, 15,
+    16, 18, 20, 22, 24, 28, 32, 40,
+    48, 64, 0x80, 0x100, 0x200, 0x400, 0x800, 0x1000,
+    0x2000, 0x4000, 0x8000, 0x10000,
+};
+pub const of_base = [32]u32{
+    0, 1, 1, 5, 0xD, 0x1D, 0x3D, 0x7D,
+    0xFD, 0x1FD, 0x3FD, 0x7FD, 0xFFD, 0x1FFD, 0x3FFD, 0x7FFD,
+    0xFFFD, 0x1FFFD, 0x3FFFD, 0x7FFFD, 0xFFFFD, 0x1FFFFD, 0x3FFFFD, 0x7FFFFD,
+    0xFFFFFD, 0x1FFFFFD, 0x3FFFFFD, 0x7FFFFFD, 0xFFFFFFD, 0x1FFFFFFD, 0x3FFFFFFD, 0x7FFFFFFD,
+};
+pub const of_bits = [32]u8{
+    0, 1, 2, 3, 4, 5, 6, 7,
+    8, 9, 10, 11, 12, 13, 14, 15,
+    16, 17, 18, 19, 20, 21, 22, 23,
+    24, 25, 26, 27, 28, 29, 30, 31,
+};
+pub const ml_base = [53]u32{
+    3, 4, 5, 6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 16, 17, 18,
+    19, 20, 21, 22, 23, 24, 25, 26,
+    27, 28, 29, 30, 31, 32, 33, 34,
+    35, 37, 39, 41, 43, 47, 51, 59,
+    67, 83, 99, 0x83, 0x103, 0x203, 0x403, 0x803,
+    0x1003, 0x2003, 0x4003, 0x8003, 0x10003,
+};
 
 pub const fcs_field_size = [4]usize{ 0, 2, 4, 8 };
 pub const did_field_size = [4]usize{ 0, 1, 2, 4 };

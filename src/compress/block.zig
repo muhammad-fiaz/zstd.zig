@@ -18,13 +18,11 @@ pub fn compressBlock(dst: []u8, src: []const u8, is_last: bool) errors.ZstdError
         dst[3] = src[0];
         return 4;
     }
-    // Try compressible path for larger inputs
-    if (src.len >= 32) {
-        if (tryCompress(dst[3..], src)) |csize| {
-            const total = csize + 3;
-            if (total < src.len + 3 and dst.len >= total) {
-                frame_block.writeBlockHeader(dst[0..3], is_last, .compressed, @intCast(csize));
-                return total;
+    if (dst.len >= 3) {
+        if (tryCompress(dst[3..], src)) |c_len| {
+            if (c_len < src.len) {
+                frame_block.writeBlockHeader(dst[0..3], is_last, .compressed, @intCast(c_len));
+                return 3 + c_len;
             }
         }
     }
@@ -45,33 +43,7 @@ fn isRle(src: []const u8) bool {
 pub fn compressBlockWithStrategy(dst: []u8, src: []const u8, is_last: bool, strategy: constants.Strategy, level: i32) errors.ZstdError!usize {
     _ = strategy;
     _ = level;
-    if (src.len == 0) {
-        if (dst.len < 3) return error.DstSizeTooSmall;
-        frame_block.writeBlockHeader(dst[0..3], is_last, .raw, 0);
-        return 3;
-    }
-    if (isRle(src)) {
-        if (dst.len < 4) return error.DstSizeTooSmall;
-        frame_block.writeBlockHeader(dst[0..3], is_last, .rle, @intCast(src.len));
-        dst[3] = src[0];
-        return 4;
-    }
-    if (src.len >= 16) {
-        const window: usize = 256;
-        const min_match: usize = 4;
-        if (tryCompressLevel(dst[3..], src, window, min_match)) |csize| {
-            const total = csize + 3;
-            if (total < src.len + 3 and dst.len >= total) {
-                frame_block.writeBlockHeader(dst[0..3], is_last, .compressed, @intCast(csize));
-                return total;
-            }
-        }
-    }
-    const bound = src.len + 3;
-    if (dst.len < bound) return error.DstSizeTooSmall;
-    frame_block.writeBlockHeader(dst[0..3], is_last, .raw, @intCast(src.len));
-    @memcpy(dst[3 .. 3 + src.len], src);
-    return 3 + src.len;
+    return compressBlock(dst, src, is_last);
 }
 
 fn tryCompress(dst: []u8, src: []const u8) ?usize {

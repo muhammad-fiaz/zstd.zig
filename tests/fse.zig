@@ -31,11 +31,13 @@ test "countFrequencies single symbol" {
     try std.testing.expectEqual(@as(u32, 3), counts[42]);
 }
 
-test "normalizeCounts unsupported" {
+test "normalizeCounts basic" {
     var normalized: [32]i16 = undefined;
     const counts = [_]u32{ 10, 5, 3 };
-    const result = i.fse_compress.normalizeCounts(&normalized, &counts, 4, 18);
-    try std.testing.expectError(error.UnsupportedFeature, result);
+    try i.fse_compress.normalizeCounts(&normalized, &counts, 5, 18);
+    try std.testing.expect(normalized[0] > 0);
+    try std.testing.expect(normalized[1] > 0);
+    try std.testing.expect(normalized[2] > 0);
 }
 
 test "buildDecoder simple" {

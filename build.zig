@@ -84,6 +84,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "custom_allocator", .file = "examples/custom_allocator.zig" },
         .{ .name = "error_handling", .file = "examples/error_handling.zig" },
         .{ .name = "legacy_decompression", .file = "examples/legacy_decompression.zig" },
+        .{ .name = "file_compression", .file = "examples/file_compression.zig" },
     };
 
     const run_all = b.step("run-all-examples", "Run all examples");
