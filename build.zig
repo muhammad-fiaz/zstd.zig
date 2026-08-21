@@ -49,6 +49,8 @@ pub fn build(b: *std.Build) void {
         .{ .name = "streaming-decompress", .file = "examples/streaming-decompress.zig" },
     };
 
+    const run_all = b.step("run-all-examples", "Run all examples");
+
     inline for (examples) |example| {
         const run_step = b.step(
             "run-" ++ example.name,
@@ -69,6 +71,7 @@ pub fn build(b: *std.Build) void {
 
         const run_exe = b.addRunArtifact(exe);
         run_step.dependOn(&run_exe.step);
+        run_all.dependOn(&run_exe.step);
         run_exe.step.dependOn(&lib.step);
     }
 }

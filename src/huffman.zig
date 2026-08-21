@@ -2,10 +2,24 @@ const std = @import("std");
 const errors = @import("errors.zig");
 const bit_reader = @import("bit_reader.zig");
 
+// Huffman codec, referencing lib/common/huf.h (HUF_compress, HUF_decompress) and
+// lib/compress/huf_compress.c (HUF_buildCTable, HUF_writeCTable).
+// Weight => nbBits mapping and canonical code generation mirrors HUF_buildCTable_wksp.
 pub const ZstdError = errors.ZstdError;
 
 pub const max_sym = 256;
 pub const max_bits = 16;
+
+pub fn reverseBits(val: u32, nbits: u8) u32 {
+    var result: u32 = 0;
+    var v = val;
+    var i: u8 = 0;
+    while (i < nbits) : (i += 1) {
+        result = (result << 1) | (v & 1);
+        v >>= 1;
+    }
+    return result;
+}
 
 pub const HuffmanTable = struct {
     symbols: [max_sym]u8,
@@ -16,8 +30,8 @@ pub const HuffmanTable = struct {
     fast_bits: u5,
 
     pub fn decodeFast(self: *const HuffmanTable, reader: *bit_reader.BitReader) ZstdError!u8 {
-        const bits = try reader.peekBits(10);
-        const entry = self.fast[bits];
+        const bits_val = try reader.peekBits(10);
+        const entry = self.fast[bits_val];
         const len = entry >> 8;
         if (len <= 10) {
             _ = try reader.readBitsRuntime(@as(u32, len));
@@ -29,8 +43,15 @@ pub const HuffmanTable = struct {
     pub fn decodeSlow(self: *const HuffmanTable, reader: *bit_reader.BitReader) ZstdError!u8 {
         var bits_left: u32 = self.max_bits;
         const accum: u32 = try reader.peekBitsRuntime(bits_left);
+        var rev: [33]u32 = .{0} ** 33;
+        var tmp = accum;
+        var i: u32 = 1;
+        while (i <= bits_left and i < 33) : (i += 1) {
+            rev[i] = (rev[i - 1] << 1) | (tmp & 1);
+            tmp >>= 1;
+        }
         while (bits_left > 0) {
-            const idx = accum >> @intCast(bits_left - 1);
+            const idx = rev[bits_left];
             const len = self.bits[idx];
             if (len > 0 and len <= bits_left) {
                 const sym = self.symbols[idx];
@@ -91,8 +112,9 @@ pub fn buildTable(weights: []const u8, table: *HuffmanTable) ZstdError!void {
             const sym_val = sorted[sorted_idx];
             const entry: u16 = (@as(u16, @intCast(bits)) << 8) | sym_val;
             const step: u16 = @as(u16, 1) << @intCast(bits);
-            var v = code;
-            while (v < 1024) : (v += step) {
+            const rev_code = reverseBits(code, bits);
+            var v = @as(u32, rev_code);
+            while (v < 1024) : (v += @as(u32, step)) {
                 table.fast[v] = entry;
             }
             code += 1;
@@ -107,9 +129,39 @@ pub fn buildTable(weights: []const u8, table: *HuffmanTable) ZstdError!void {
         var s: u16 = 0;
         while (s < num_syms) : (s += 1) {
             if (weights[sorted[s]] == bits) {
-                table.symbols[c] = @intCast(sorted[s]);
-                table.bits[c] = bits;
+                const rev_c = reverseBits(c, bits);
+                table.symbols[rev_c] = @intCast(sorted[s]);
+                table.bits[rev_c] = bits;
                 c += 1;
+            }
+        }
+    }
+}
+
+pub fn buildCodes(weights: []const u8, codes: []u32, out_code_bits: []u8) void {
+    var counts: [max_bits + 1]u16 = .{0} ** (max_bits + 1);
+    var max_w: u8 = 0;
+
+    for (weights) |w| {
+        if (w > 0) {
+            counts[w] += 1;
+            if (w > max_w) max_w = w;
+        }
+    }
+
+    @memset(codes, 0);
+    @memset(out_code_bits, 0);
+
+    var code: u32 = 0;
+    var bits: u4 = 1;
+    while (bits <= max_w) : (bits += 1) {
+        code = (code + @as(u32, counts[bits - 1])) << 1;
+        var sym: u16 = 0;
+        while (sym < weights.len) : (sym += 1) {
+            if (weights[sym] == bits) {
+                codes[sym] = code;
+                out_code_bits[sym] = bits;
+                code += 1;
             }
         }
     }

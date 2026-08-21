@@ -7,17 +7,12 @@ description: Get up and running with zstd.zig in minutes.
 
 zstd.zig is a complete native Zig implementation of [Zstandard](https://facebook.github.io/zstd/) compression. No C bindings, no external dependencies — just Zig.
 
-::: warning Version Compatibility
-Zig 0.17.0 is currently in development. Install it via:
-```bash
-scoop bucket add versions
-scoop install versions/zig-dev
-```
+::: warning Version Requirement
+This library targets **Zig 0.16.0** (stable). Download from [ziglang.org](https://ziglang.org/download/).
 
-| Zig Version | Status | Notes |
-|-------------|--------|-------|
-| 0.17.0+ | Dev builds | Full native implementation (this library) |
-| 0.16.0 | Stable | Previously available as a Zig binding to the C zstd library |
+| Zig Version | Status |
+|-------------|--------|
+| 0.16.0 | Supported — required for this library |
 :::
 
 ## Quick Start
@@ -47,9 +42,7 @@ const std = @import("std");
 const zstd = @import("zstd");
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const allocator = std.heap.page_allocator;
 
     const original = "Hello, zstd.zig! This text will be compressed.";
 
@@ -76,7 +69,7 @@ const fast = try zstd.compress(allocator, data, .{ .level = .fastest });
 // Use best compression
 const best = try zstd.compress(allocator, data, .{ .level = .best });
 
-// Use a custom level (1-22, or -131072 to 22)
+// Use a custom level (1-22)
 const custom = try zstd.compress(allocator, data, .{
     .level = @enumFromInt(12),
 });

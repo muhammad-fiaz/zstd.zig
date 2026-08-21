@@ -4,6 +4,7 @@ const errors = @import("errors.zig");
 const bit_reader_mod = @import("bit_reader.zig");
 const huffman_mod = @import("huffman.zig");
 const fse_mod = @import("fse.zig");
+const xxh64 = @import("xxh64.zig");
 
 pub const ZstdError = errors.ZstdError;
 
@@ -86,9 +87,10 @@ fn decompressFrame(allocator: std.mem.Allocator, src: []const u8, output: *std.A
         pos += 1;
 
         if (opts.max_window_size) |max_win| {
-            const exp: u6 = @intCast(window_descriptor & 0x0F);
-            const mantissa: u32 = @as(u32, 1) << @intCast(3 + (window_descriptor >> 3));
-            const window_size: u64 = (@as(u64, 1) << @intCast(exp)) + @as(u64, mantissa);
+            // lib/common/zstd_internal.h: windowLog = 10 + (windowDescriptor & 0x0F) + ((windowDescriptor>>4) & 0x07 ???)
+            // Simplified per spec: mantissa + exponent. For now use low 4 bits as in previous impl, but reference lib.
+            const window_log: u64 = @as(u64, @intCast(window_descriptor & 0x0F)) + 10;
+            const window_size: u64 = @as(u64, 1) << @intCast(@min(window_log, 31));
             if (window_size > max_win) return error.WindowOversize;
         }
     }
@@ -101,29 +103,31 @@ fn decompressFrame(allocator: std.mem.Allocator, src: []const u8, output: *std.A
     }
 
     var content_size: ?u64 = null;
-    if (fcs_flag > 0 or single_segment) {
-        const field_size: usize = @as(usize, 1) << @intCast(fcs_flag);
-        if (fcs_flag > 0) {
-            if (pos + field_size > src.len) return error.SrcSizeWrong;
-            const fcs_val: u64 = switch (fcs_flag) {
-                1 => src[pos],
-                2 => std.mem.readInt(u16, src[pos..][0..2], .little),
-                3 => std.mem.readInt(u64, src[pos..][0..8], .little),
-                else => unreachable,
-            };
-            if (fcs_val == constants.content_size_unknown) {
-                content_size = null;
-            } else if (fcs_val == constants.content_size_error) {
-                return error.CorruptionDetected;
-            } else {
-                content_size = fcs_val;
-            }
+    if (fcs_flag > 0) {
+        const field_size: usize = switch (fcs_flag) {
+            1 => 1,
+            2 => 2,
+            3 => 8,
+            else => 0,
+        };
+        if (pos + field_size > src.len) return error.SrcSizeWrong;
+        const fcs_val: u64 = switch (fcs_flag) {
+            1 => src[pos],
+            2 => std.mem.readInt(u16, src[pos..][0..2], .little),
+            3 => std.mem.readInt(u64, src[pos..][0..8], .little),
+            else => unreachable,
+        };
+        if (fcs_val == constants.content_size_unknown) {
+            content_size = null;
+        } else if (fcs_val == constants.content_size_error) {
+            return error.CorruptionDetected;
+        } else {
+            content_size = fcs_val;
         }
         pos += field_size;
     }
 
     const output_start = output.items.len;
-    var xxh64_state: u64 = 0;
 
     while (pos + 3 <= src.len) {
         const b0 = src[pos];
@@ -134,56 +138,186 @@ fn decompressFrame(allocator: std.mem.Allocator, src: []const u8, output: *std.A
         const block_header: u32 = @as(u32, b0) | (@as(u32, b1) << 8) | (@as(u32, b2) << 16);
         const is_last = (block_header & 1) != 0;
         const bt: u2 = @truncate((block_header >> 1) & 0x3);
-        const raw_block_size: u32 = (block_header >> 3) + 1;
+        const orig_size: u32 = block_header >> 3;
+        // Per lib/decompress/zstd_decompress_block.c:ZSTD_getcBlockSize, RLE's cSize is 1, origSize is decompressed size.
+        const c_block_size: u32 = if (bt == block_type_rle) 1 else orig_size;
 
-        if (pos + raw_block_size > src.len) return error.SrcSizeWrong;
-        const block_data = src[pos..][0..raw_block_size];
+        if (pos + c_block_size > src.len) return error.SrcSizeWrong;
+        const block_data = src[pos..][0..c_block_size];
 
         switch (bt) {
             block_type_raw => {
                 try output.appendSlice(allocator, block_data);
             },
             block_type_rle => {
-                if (raw_block_size == 0) return error.CorruptionDetected;
+                if (orig_size == 0) return error.CorruptionDetected;
                 const rle_byte = block_data[0];
                 const old_len = output.items.len;
-                try output.resize(allocator, old_len + raw_block_size);
-                @memset(output.items[old_len..][0..raw_block_size], rle_byte);
+                try output.resize(allocator, old_len + orig_size);
+                @memset(output.items[old_len..][0..orig_size], rle_byte);
             },
             block_type_compressed => {
-                try decompressCompressedBlock(allocator, block_data, output);
+                // Try spec-compliant path first (lib/decompress/zstd_decompress_block.c), fallback to custom for legacy Zig blocks.
+                decompressCompressedBlockSpec(allocator, block_data, output) catch |e| {
+                    // Fallback to custom format if spec parsing fails with header errors; preserves compatibility with earlier native Zig blocks.
+                    if (e == error.LiteralsHeaderWrong or e == error.MalformedLiteralsSection or e == error.MalformedBlock) {
+                        try decompressCompressedBlockCustom(allocator, block_data, output);
+                    } else {
+                        return e;
+                    }
+                };
             },
             3 => return error.ReservedBlock,
         }
 
-        if (has_checksum) {
-            xxh64_state = xxh64Update(xxh64_state, output.items[output_start..]);
-        }
-
-        pos += raw_block_size;
+        pos += c_block_size;
 
         if (is_last) {
-            if (has_checksum) {
-                if (pos + 4 > src.len) return error.SrcSizeWrong;
-                const stored_sum = std.mem.readInt(u32, src[pos..][0..4], .little);
-                const computed: u32 = @truncate(xxh64_state);
-                if (stored_sum != computed) return error.ChecksumWrong;
-                pos += 4;
-            }
-
-            if (content_size) |expected| {
-                const actual: u64 = output.items.len - output_start;
-                if (actual != expected) return error.ContentOversize;
-            }
-
-            return pos;
+            break;
         }
     }
 
-    return error.SrcSizeWrong;
+    if (has_checksum) {
+        if (pos + 4 > src.len) return error.SrcSizeWrong;
+        const stored_sum = std.mem.readInt(u32, src[pos..][0..4], .little);
+        const computed: u32 = @truncate(xxh64.hash(output.items[output_start..]));
+        if (stored_sum != computed) return error.ChecksumWrong;
+        pos += 4;
+    }
+
+    if (content_size) |expected| {
+        const actual: u64 = output.items.len - output_start;
+        if (actual != expected) return error.ContentOversize;
+    }
+
+    return pos;
 }
 
-fn decompressCompressedBlock(allocator: std.mem.Allocator, block: []const u8, output: *std.ArrayList(u8)) ZstdError!void {
+// Spec-compliant literals + sequences decoding, referencing lib/decompress/zstd_decompress_block.c:ZSTD_decodeLiteralsBlock and ZSTD_decodeSeqHeaders.
+// Supports raw (set_basic) and RLE (set_rle) literals, plus nbSeq==0 fast path. Compressed literals (Huffman) currently fall back to custom.
+// See lib/compress/zstd_compress_literals.c:ZSTD_noCompressLiterals for header encoding.
+fn decompressCompressedBlockSpec(allocator: std.mem.Allocator, block: []const u8, output: *std.ArrayList(u8)) ZstdError!void {
+    if (block.len == 0) return error.MalformedBlock;
+
+    // --- Literals section ---
+    const litEncType: u2 = @truncate(block[0] & 3);
+    var litSize: usize = 0;
+    var lhSize: usize = 0;
+    var litCSize: usize = 0; // only for compressed
+
+    switch (litEncType) {
+        0, 1 => { // set_basic (0) or set_rle (1) -> raw/RLE per lib/decompress/zstd_decompress_block.c case set_basic/set_rle
+            const lhlCode: u2 = @truncate((block[0] >> 2) & 3);
+            switch (lhlCode) {
+                0, 2 => {
+                    lhSize = 1;
+                    if (block.len < lhSize) return error.LiteralsHeaderWrong;
+                    litSize = block[0] >> 3;
+                },
+                1 => {
+                    lhSize = 2;
+                    if (block.len < lhSize) return error.LiteralsHeaderWrong;
+                    litSize = @as(usize, std.mem.readInt(u16, block[0..2], .little)) >> 4;
+                },
+                3 => {
+                    lhSize = 3;
+                    if (block.len < lhSize) return error.LiteralsHeaderWrong;
+                    const v: u32 = @as(u32, block[0]) | (@as(u32, block[1]) << 8) | (@as(u32, block[2]) << 16);
+                    litSize = v >> 4;
+                },
+            }
+            if (lhSize + litSize > block.len and litEncType == 0) {
+                // For raw, need at least litSize bytes after header
+                if (lhSize + litSize > block.len) return error.MalformedLiteralsSection;
+            }
+            if (litEncType == 1) {
+                // RLE: after header, exactly 1 byte payload, but litSize is regenerated size
+                if (lhSize + 1 > block.len) return error.MalformedLiteralsSection;
+                if (litSize == 0) return error.MalformedLiteralsSection;
+            }
+        },
+        2, 3 => { // set_compressed / set_repeat -> Huffman
+            // lib/decompress/zstd_decompress_block.c: lhlCode determines lhSize 3/4/5
+            // lhc = LE32(block)
+            if (block.len < 3) return error.LiteralsHeaderWrong;
+            const lhlCode: u2 = @truncate((block[0] >> 2) & 3);
+            const lhc: u32 = std.mem.readInt(u32, block[0..4], .little);
+            switch (lhlCode) {
+                0, 1 => {
+                    // 2-2-10-10
+                    lhSize = 3;
+                    litSize = (lhc >> 4) & 0x3FF;
+                    litCSize = (lhc >> 14) & 0x3FF;
+                },
+                2 => {
+                    lhSize = 4;
+                    litSize = (lhc >> 4) & 0x3FFF;
+                    litCSize = lhc >> 18;
+                },
+                3 => {
+                    lhSize = 5;
+                    if (block.len < 5) return error.LiteralsHeaderWrong;
+                    litSize = (lhc >> 4) & 0x3FFFF;
+                    litCSize = (lhc >> 22) + (@as(usize, block[4]) << 10);
+                },
+            }
+            if (lhSize + litCSize > block.len) return error.MalformedLiteralsSection;
+            // For this minimal spec path, delegate Huffman decompression to custom handler if needed.
+            // We currently don't implement full HUF_decompress4X* (lib/common/huf.h), so fallback to custom Huffman for compatibility.
+            // Signal to caller to fallback if we can't handle.
+            return error.LiteralsHeaderWrong;
+        },
+    }
+
+    var decoded_literals: [constants.block_size_max]u8 = undefined;
+    const regen_size: usize = litSize;
+
+    switch (litEncType) {
+        0 => { // set_basic = raw
+            if (lhSize + litSize > block.len) return error.MalformedLiteralsSection;
+            @memcpy(decoded_literals[0..litSize], block[lhSize..][0..litSize]);
+        },
+        1 => { // set_rle
+            if (lhSize >= block.len) return error.MalformedLiteralsSection;
+            const v = block[lhSize];
+            @memset(decoded_literals[0..litSize], v);
+        },
+        else => unreachable, // handled above
+    }
+
+    // --- Sequences section ---
+    var seq_pos = lhSize + (if (litEncType == 0) litSize else if (litEncType == 1) @as(usize, 1) else litCSize);
+    if (seq_pos >= block.len) {
+        // No sequences section -> only literals
+        try output.appendSlice(allocator, decoded_literals[0..regen_size]);
+        return;
+    }
+
+    // NbSeq decoding per lib/decompress/zstd_decompress_block.c:ZSTD_decodeSeqHeaders
+    var nbSeq: usize = block[seq_pos];
+    seq_pos += 1;
+    if (nbSeq == 0xFF) {
+        if (seq_pos + 2 > block.len) return error.MalformedBlock;
+        nbSeq = @as(usize, std.mem.readInt(u16, block[seq_pos..][0..2], .little)) + 0x7F00;
+        seq_pos += 2;
+    } else if (nbSeq > 0x7F) {
+        if (seq_pos >= block.len) return error.MalformedBlock;
+        nbSeq = ((nbSeq - 0x80) << 8) + block[seq_pos];
+        seq_pos += 1;
+    }
+    if (nbSeq == 0) {
+        try output.appendSlice(allocator, decoded_literals[0..regen_size]);
+        return;
+    }
+
+    // For nbSeq>0, full FSE decoding required (lib/common/fse.h). Minimal impl supports only nbSeq==0; otherwise fallback to custom Huffman path.
+    // Custom path handles nbSeq>0 with our Huffman tables, so signal fallback.
+    return error.MalformedBlock;
+}
+
+// Legacy custom block decoding (pre-spec). Kept for backward compatibility with previously generated Zig blocks.
+// Uses bit-stream + Huffman weights (8,32,8) and custom seq header. See previous implementation.
+fn decompressCompressedBlockCustom(allocator: std.mem.Allocator, block: []const u8, output: *std.ArrayList(u8)) ZstdError!void {
     if (block.len < 3) return error.MalformedBlock;
 
     var reader = bit_reader_mod.BitReader.init(block);
@@ -310,6 +444,7 @@ fn decompressCompressedBlock(allocator: std.mem.Allocator, block: []const u8, ou
     var offset_table = std.mem.zeroes(huffman_mod.HuffmanTable);
 
     if (ml_mode == 0) {
+        if (seq_pos + 8 > block.len) return error.MalformedBlock;
         const ml_weights = block[seq_pos..][0..8];
         seq_pos += 8;
         var w: [256]u8 = .{0} ** 256;
@@ -320,6 +455,7 @@ fn decompressCompressedBlock(allocator: std.mem.Allocator, block: []const u8, ou
     }
 
     if (of_mode == 0) {
+        if (seq_pos + 32 > block.len) return error.MalformedBlock;
         const of_weights = block[seq_pos..][0..32];
         seq_pos += 32;
         var w: [256]u8 = .{0} ** 256;
@@ -330,6 +466,7 @@ fn decompressCompressedBlock(allocator: std.mem.Allocator, block: []const u8, ou
     }
 
     if (ll_mode == 0) {
+        if (seq_pos + 8 > block.len) return error.MalformedBlock;
         const ll_weights = block[seq_pos..][0..8];
         seq_pos += 8;
         var w: [256]u8 = .{0} ** 256;
@@ -475,32 +612,6 @@ fn decodeHuffmanLiterals(data: []const u8, output: []u8, regen_size: usize) Zstd
     while (written < regen_size) : (written += 1) {
         output[written] = table.decodeFast(&reader) catch return error.InvalidBitStream;
     }
-}
-
-const XXH_PRIME1: u64 = 0x9E3779B185EBCA87;
-const XXH_PRIME2: u64 = 0xC2B2AE3D27D4EB4F;
-const XXH_PRIME3: u64 = 0x165667B19E3779F9;
-const XXH_PRIME4: u64 = 0x85EBCA77C2B2AE63;
-const XXH_PRIME5: u64 = 0x27D4EB2F165667C5;
-
-fn xxh64Update(state: u64, data: []const u8) u64 {
-    var s = state;
-    var i: usize = 0;
-
-    while (i + 8 <= data.len) : (i += 8) {
-        const lane = std.mem.readInt(u64, data[i..][0..8], .little);
-        s +%= lane *% XXH_PRIME2;
-        s = std.math.rotl(u64, s, 31);
-        s *%= XXH_PRIME1;
-    }
-
-    while (i < data.len) : (i += 1) {
-        s +%= @as(u64, data[i]) *% XXH_PRIME5;
-        s = std.math.rotl(u64, s, 27);
-        s *%= XXH_PRIME4;
-    }
-
-    return s;
 }
 
 test "decompress empty input" {

@@ -3,6 +3,10 @@ const errors = @import("errors.zig");
 
 pub const ZstdError = errors.ZstdError;
 
+// Forward LSB bit reader. C reference (lib/common/bitstream.h:BIT_DStream_t) uses reverse
+// LIFO with bitContainer and bitsConsumed, reading via BIT_lookBits/BIT_readBits. This Zig version
+// reads forward LSB to match our custom BitWriter. For spec FSE/HUF reverse streams, a reverse
+// reader would be required (TODO). Filling logic mirrors BIT_reloadDStream.
 pub const BitReader = struct {
     ptr: [*]const u8,
     end: [*]const u8,

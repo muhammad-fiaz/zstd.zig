@@ -21,6 +21,38 @@ if (zstd.Frame.isFrame(data)) {
 }
 ```
 
+## `inspect`
+
+Get detailed frame metadata in a single call.
+
+```zig
+pub fn inspect(src: []const u8) ?FrameInfo
+```
+
+```zig
+const info = zstd.Frame.inspect(compressed);
+if (info) |i| {
+    std.debug.print("Content size: {?}\n", .{i.content_size});
+    std.debug.print("Window size: {?}\n", .{i.window_size});
+    std.debug.print("Dictionary ID: {?}\n", .{i.dictionary_id});
+    std.debug.print("Checksum: {}\n", .{i.checksum});
+    std.debug.print("Single segment: {}\n", .{i.single_segment});
+}
+```
+
+### FrameInfo
+
+```zig
+pub const FrameInfo = struct {
+    content_size: ?u64,
+    window_size: ?u64,
+    dictionary_id: ?u32,
+    checksum: bool,
+    single_segment: bool,
+    fcs_flag: u2,
+};
+```
+
 ## `contentSize`
 
 Get the original content size from the frame header.

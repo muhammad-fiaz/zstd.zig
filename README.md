@@ -47,33 +47,33 @@
 <details>
 <summary><strong>Features</strong> (click to expand)</summary>
 
-| Feature | Description | Status |
-|---------|-------------|--------|
-| **One-shot Compression** | `zstd.compress()` for single-call compression with configurable options | Implemented |
-| **One-shot Decompression** | `zstd.decompress()` for single-call decompression with safety limits | Implemented |
-| **Compression Levels** | Named levels (`.fastest`, `.default`, `.best`) and raw numeric levels (1-22) | Implemented |
-| **Reusable Compressor** | `Compressor` struct for efficient multi-call compression with state | Implemented |
-| **Reusable Decompressor** | `Decompressor` struct for efficient multi-call decompression with configurable limits | Implemented |
-| **Streaming Compression** | `StreamCompressor` for chunked data with `compressChunk()` and `endStream()` | Implemented |
-| **Streaming Decompression** | `StreamDecompressor` for chunked data with `decompressChunk()` | Implemented |
-| **Dictionary Compression** | `CDict`/`DDict` for trained dictionaries with `compress()`/`decompress()` methods | Implemented |
-| **Dictionary Training** | `trainFromSamples()` and `finalizeDictionary()` for creating custom dictionaries | Implemented |
-| **Frame Inspection** | `Frame.isFrame()`, `Frame.inspect()`, `Frame.contentSize()` for metadata extraction | Implemented |
-| **Parameter Bounds** | `cParamGetBounds()` and `dParamGetBounds()` for querying parameter ranges | Implemented |
-| **CParameter API** | Compression parameters: window_log, hash_log, chain_log, search_log, min_match, strategy | Implemented |
-| **DParameter API** | Decompression parameters: window_log_max | Implemented |
-| **Checksum Support** | Optional XXH64 checksum in frame headers for data integrity verification | Implemented |
-| **Reserved Bit Rejection** | Strict validation of reserved bits in frame headers and block types | Implemented |
-| **Content Size Validation** | Validates content size on decompression against expected size | Implemented |
-| **Window Size Limits** | Configurable `max_window_size` for decompression safety | Implemented |
-| **Output Size Limits** | Configurable `max_output_size` to prevent unbounded allocation | Implemented |
-| **Multi-frame Decompression** | Decompress multiple concatenated zstd frames in sequence | Implemented |
-| **Skippable Frame Support** | Skip non-data frames during decompression | Implemented |
-| **Cross-platform** | Linux, Windows, macOS with x86_64, aarch64, x86 support | Implemented |
-| **Zero Dependencies** | Pure Zig implementation — no C libraries, no system dependencies | Implemented |
-| **Strategy Selection** | Fast, DFast, Greedy, Lazy, Lazy2, BTLazy2, BTOpt, BTUltra strategies | Implemented |
-| **Compression Bound** | `compressBound()` for pre-allocating output buffers | Implemented |
-| **Backward Compatible** | Legacy function aliases available alongside modern API | Implemented |
+| Feature | Description |
+|---------|-------------|
+| **One-shot Compression** | `zstd.compress()` for single-call compression with configurable options |
+| **One-shot Decompression** | `zstd.decompress()` for single-call decompression with safety limits |
+| **Compression Levels** | Named levels (`.fastest`, `.default`, `.best`) and raw numeric levels (1-22) |
+| **Reusable Compressor** | `Compressor` struct for efficient multi-call compression with state |
+| **Reusable Decompressor** | `Decompressor` struct for efficient multi-call decompression with configurable limits |
+| **Streaming Compression** | `StreamCompressor` for chunked data with `compressChunk()` and `endStream()` |
+| **Streaming Decompression** | `StreamDecompressor` for chunked data with `decompressChunk()` |
+| **Dictionary Compression** | `CDict`/`DDict` for trained dictionaries with `compress()`/`decompress()` methods |
+| **Dictionary Training** | `trainFromSamples()` and `finalizeDictionary()` for creating custom dictionaries |
+| **Frame Inspection** | `Frame.isFrame()`, `Frame.inspect()`, `Frame.contentSize()` for metadata extraction |
+| **Parameter Bounds** | `cParamGetBounds()` and `dParamGetBounds()` for querying parameter ranges |
+| **CParameter API** | Compression parameters: window_log, hash_log, chain_log, search_log, min_match, strategy |
+| **DParameter API** | Decompression parameters: window_log_max |
+| **Checksum Support** | Optional XXH64 checksum in frame headers for data integrity verification |
+| **Reserved Bit Rejection** | Strict validation of reserved bits in frame headers and block types |
+| **Content Size Validation** | Validates content size on decompression against expected size |
+| **Window Size Limits** | Configurable `max_window_size` for decompression safety |
+| **Output Size Limits** | Configurable `max_output_size` to prevent unbounded allocation |
+| **Multi-frame Decompression** | Decompress multiple concatenated zstd frames in sequence |
+| **Skippable Frame Support** | Skip non-data frames during decompression |
+| **Cross-platform** | Linux, Windows, macOS with x86_64, aarch64, x86 support |
+| **Zero Dependencies** | Pure Zig implementation — no C libraries, no system dependencies |
+| **Strategy Selection** | Fast, DFast, Greedy, Lazy, Lazy2, BTLazy2, BTOpt, BTUltra strategies |
+| **Compression Bound** | `compressBound()` for pre-allocating output buffers |
+| **Backward Compatible** | Legacy function aliases available alongside modern API |
 
 </details>
 
@@ -92,9 +92,6 @@ Before using `zstd.zig`, ensure you have the following:
 |-------------|---------|-------|
 | **Zig** | **0.16.0** (recommended) | Download from [ziglang.org](https://ziglang.org/download/) |
 | **Operating System** | Windows 10+, Linux, macOS | Cross-platform support |
-
-> [!IMPORTANT]
-> **Zig 0.16.0 is required.** This project targets Zig 0.16.0 (stable). Zig 0.17.0 is in development (dev branch, not yet a stable release) and introduces several minor breaking changes from 0.16.0. Migration to 0.17.0 will happen once it is officially released as a stable version. Please use Zig 0.16.0 for all builds.
 
 ---
 
@@ -381,15 +378,7 @@ Validate host functionality and cross-target compatibility with these commands:
 ```bash
 # Host runtime validation
 zig build test
-zig build run-basic
-zig build run-streaming
-zig build run-decompress
-zig build run-compression-levels
-zig build run-dictionary
-zig build run-frame-inspection
-zig build run-advanced-parameters
-zig build run-custom-allocator
-zig build run-streaming-decompress
+zig build run-all-examples
 
 # Cross-target library compile validation
 zig build -Dtarget=aarch64-linux
@@ -410,9 +399,10 @@ zig build test -Dtarget=aarch64-macos
 ## Building & Testing
 
 ```bash
-zig build            # Build library
-zig build test       # Run all tests (35+)
-zig build docs       # Generate documentation site
+zig build                    # Build library
+zig build test               # Run all tests (41+)
+zig build run-all-examples   # Run all 9 examples
+zig build docs               # Generate documentation site
 ```
 
 ## Contributing

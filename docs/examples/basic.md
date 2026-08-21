@@ -12,9 +12,7 @@ const std = @import("std");
 const zstd = @import("zstd");
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const allocator = std.heap.page_allocator;
 
     const original = "Hello, zstd.zig! This text will be compressed.";
 

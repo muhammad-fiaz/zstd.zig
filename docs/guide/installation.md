@@ -7,16 +7,8 @@ description: How to install and set up zstd.zig in your Zig project.
 
 ## Requirements
 
-- **Zig 0.17.0+** (dev builds) — native implementation
+- **Zig 0.16.0** — download from [ziglang.org](https://ziglang.org/download/)
 - No external dependencies required
-
-::: warning
-Zig 0.17.0 is currently in development. Install the latest dev build via:
-```bash
-scoop bucket add versions
-scoop install versions/zig-dev
-```
-:::
 
 ## Setup
 
@@ -73,12 +65,3 @@ const compressed = try zstd.compress(allocator, data, .{});
 ## Verify Installation
 
 Run `zig build` to fetch the dependency and compile. If it succeeds, zstd.zig is properly installed.
-
-## Zig Version Notes
-
-| Zig Version | Status | Notes |
-|-------------|--------|-------|
-| 0.17.0+ | Dev builds | Full native implementation (this library) |
-| 0.16.0 | Stable | Previously available as a Zig binding to the C zstd library |
-
-The native implementation for 0.17.0+ has no C dependency and works on all supported platforms.

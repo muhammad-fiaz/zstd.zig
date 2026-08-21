@@ -2,10 +2,18 @@ const std = @import("std");
 const errors = @import("errors.zig");
 const bit_reader = @import("bit_reader.zig");
 
+// FSE (Finite State Entropy) table decoder, referencing lib/common/fse.h and lib/common/zstd_internal.h
+// Default distributions per lib/common/zstd_internal.h: LL_defaultNorm, ML_defaultNorm, OF_defaultNorm
+// Table building follows FSE_buildDTable_wksp logic (lib/common/fse_compress.c / fse_decompress.c).
 pub const ZstdError = errors.ZstdError;
 
 pub const fse_max_bits = 15;
 pub const fse_max_symbols = 256;
+
+// Default FSE distributions from lib/common/zstd_internal.h (used when SymbolEncodingType == set_basic)
+pub const LL_defaultNorm = [_]i16{ 4, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 2, 1, 1, 1, 1, 1, -1, -1, -1, -1 };
+pub const ML_defaultNorm = [_]i16{ 1, 4, 3, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1 };
+pub const OF_defaultNorm = [_]i16{ 1, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1 };
 
 pub const FseTable = struct {
     symbols: [fse_max_symbols]u8,

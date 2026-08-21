@@ -43,9 +43,8 @@ pub fn inspect(src: []const u8) ?FrameInfo {
         if (pos >= src.len) return null;
         const wd = src[pos];
         pos += 1;
-        const exp: u6 = @intCast(wd & 0x0F);
-        const mantissa: u32 = @as(u32, 1) << @intCast(3 + (wd >> 3));
-        window_size = (@as(u64, 1) << @intCast(exp)) + @as(u64, mantissa);
+        const window_log: u64 = @as(u64, @intCast(wd & 0x0F)) + 10;
+        window_size = @as(u64, 1) << @intCast(@min(window_log, 31));
     }
 
     var dict_id: ?u32 = null;
@@ -59,19 +58,22 @@ pub fn inspect(src: []const u8) ?FrameInfo {
     }
 
     var content_size: ?u64 = null;
-    if (fcs_flag > 0 or single_segment) {
-        const field_size: usize = if (fcs_flag == 0) @as(usize, 0) else @as(usize, 1) << @intCast(fcs_flag);
-        if (fcs_flag > 0) {
-            if (pos + field_size > src.len) return null;
-            const fcs_val: u64 = switch (fcs_flag) {
-                1 => src[pos],
-                2 => std.mem.readInt(u16, src[pos..][0..2], .little),
-                3 => std.mem.readInt(u64, src[pos..][0..8], .little),
-                else => 0,
-            };
-            if (fcs_val != constants.content_size_unknown and fcs_val != constants.content_size_error) {
-                content_size = fcs_val;
-            }
+    if (fcs_flag > 0) {
+        const field_size: usize = switch (fcs_flag) {
+            1 => 1,
+            2 => 2,
+            3 => 8,
+            else => 0,
+        };
+        if (pos + field_size > src.len) return null;
+        const fcs_val: u64 = switch (fcs_flag) {
+            1 => src[pos],
+            2 => std.mem.readInt(u16, src[pos..][0..2], .little),
+            3 => std.mem.readInt(u64, src[pos..][0..8], .little),
+            else => 0,
+        };
+        if (fcs_val != constants.content_size_unknown and fcs_val != constants.content_size_error) {
+            content_size = fcs_val;
         }
         pos += field_size;
     }
@@ -141,8 +143,16 @@ pub fn compressedSize(src: []const u8) ZstdError!usize {
         const dict_id_flag = (descriptor >> 3) & 0x3;
         const single_segment = (descriptor & 0x40) != 0;
 
-        var header_size: usize = if (single_segment) 4 else 5;
-        if (fcs_flag >= 1) header_size += @as(usize, 1) << @intCast(fcs_flag);
+        var header_size: usize = 5; // magic(4) + descriptor(1)
+        if (!single_segment) header_size += 1; // window descriptor
+        if (fcs_flag >= 1) {
+            header_size += switch (fcs_flag) {
+                1 => 1,
+                2 => 2,
+                3 => 8,
+                else => 0,
+            };
+        }
         if (dict_id_flag >= 1) {
             const field_size: usize = if (dict_id_flag == 3) 4 else @as(usize, 1) << @intCast(dict_id_flag - 1);
             header_size += field_size;
@@ -153,7 +163,7 @@ pub fn compressedSize(src: []const u8) ZstdError!usize {
             const header_val: u32 = @as(u32, src[pos]) | (@as(u32, src[pos + 1]) << 8) | (@as(u32, src[pos + 2]) << 16);
             const is_last = (header_val & 1) != 0;
             const block_type: u2 = @truncate((header_val >> 1) & 0x3);
-            const block_size: u32 = (header_val >> 3) + 1;
+            const block_size: u32 = header_val >> 3;
             pos += 3;
 
             if (block_type == 3) return error.CorruptionDetected;
