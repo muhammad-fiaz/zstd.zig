@@ -35,10 +35,23 @@ jobs:
         uses: mlugg/setup-zig@v2
         with:
           version: ${{ matrix.zig }}
+      - name: Install QEMU for cross tests (Linux)
+        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'aarch64'
+        run: sudo apt-get update && sudo apt-get install -y qemu-user-static qemu-user
+      - name: Install QEMU for cross tests (Windows)
+        if: matrix.os == 'windows-latest' && matrix.arch == 'aarch64'
+        run: choco install qemu -y
       - name: Build
         run: zig build -Dtarget=${{ matrix.arch }}-${{ fromJSON('{"ubuntu-latest":"linux","windows-latest":"windows","macos-latest":"macos"}')[matrix.os] }}
       - name: Test
-        run: zig build test -Dtarget=${{ matrix.arch }}-${{ fromJSON('{"ubuntu-latest":"linux","windows-latest":"windows","macos-latest":"macos"}')[matrix.os] }} --summary all
+        shell: bash
+        run: |
+          TARGET="${{ matrix.arch }}-${{ fromJSON('{"ubuntu-latest":"linux","windows-latest":"windows","macos-latest":"macos"}')[matrix.os] }}"
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            zig build test -Dtarget=$TARGET --summary all -fqemu
+          else
+            zig build test -Dtarget=$TARGET --summary all
+          fi
 
   fmt:
     runs-on: ubuntu-latest

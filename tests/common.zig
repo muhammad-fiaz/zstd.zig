@@ -24,8 +24,13 @@ test "countLeadingZeros32" {
 }
 
 test "nbCommonBytes" {
-    try std.testing.expectEqual(@as(u32, 0), i.bits.nbCommonBytes(0x00FF00FF00FF00FF));
-    try std.testing.expectEqual(@as(u32, 7), i.bits.nbCommonBytes(0xFF00000000000000));
+    if (@sizeOf(usize) == 8) {
+        try std.testing.expectEqual(@as(u32, 0), i.bits.nbCommonBytes(0x00FF00FF00FF00FF));
+        try std.testing.expectEqual(@as(u32, 7), i.bits.nbCommonBytes(0xFF00000000000000));
+    } else {
+        try std.testing.expectEqual(@as(u32, 0), i.bits.nbCommonBytes(0x00FF00FF));
+        try std.testing.expectEqual(@as(u32, 3), i.bits.nbCommonBytes(0xFF000000));
+    }
 }
 
 test "rotateRightU32" {
