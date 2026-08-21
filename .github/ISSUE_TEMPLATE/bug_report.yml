@@ -1,5 +1,5 @@
 name: Bug Report
-description: Create a report to help us improve tint.zig
+description: Create a report to help us improve zstd.zig
 title: "[Bug]: "
 labels: ["bug", "triage"]
 assignees:
@@ -23,7 +23,7 @@ body:
       label: Reproduction Steps
       description: Steps to reproduce the behavior.
       placeholder: |
-        1. Initialize project with tint.zig
+        1. Initialize project with zstd.zig
         2. Run `zig build run-example`
         3. See error
     validations:
@@ -38,8 +38,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: tint.zig Version
-      description: What version of tint.zig are you using?
+      label: zstd.zig Version
+      description: What version of zstd.zig are you using?
       placeholder: 0.0.1
     validations:
       required: true
