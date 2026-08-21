@@ -14,7 +14,7 @@
 <a href="https://github.com/sponsors/muhammad-fiaz"><img src="https://img.shields.io/badge/Sponsor-GitHub-pink?style=social&logo=github" alt="GitHub Sponsors"></a>
 <a href="https://hits.sh/muhammad-fiaz/zstd.zig/"><img src="https://hits.sh/muhammad-fiaz/zstd.zig.svg?label=Visitors&extraCount=0&color=green" alt="Repo Visitors"></a>
 
-<p><em>Complete native Zig implementation of Facebook's Zstandard fast compression library.</em></p>
+<p><em>native Zig implementation of Facebook's Zstandard fast compression library.</em></p>
 
 <b><a href="https://muhammad-fiaz.github.io/zstd.zig/">Documentation</a> |
 <a href="https://muhammad-fiaz.github.io/zstd.zig/api/">API Reference</a> |
