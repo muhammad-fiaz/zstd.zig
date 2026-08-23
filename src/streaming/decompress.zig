@@ -58,6 +58,22 @@ pub const StreamingDecompressor = struct {
                     continue;
                 }
                 if (magic != constants.magic_number) return error.PrefixUnknown;
+
+                // Compute the exact frame-header length so partial headers
+                // wait for more input instead of failing mid-parse.
+                const fhd: u8 = slice[4];
+                const ss = (fhd >> 5) & 1;
+                var need: usize = 5;
+                if (ss == 0) need += 1; // window descriptor
+                need += constants.did_field_size[fhd & 3];
+                const fcs_code: u2 = @truncate(fhd >> 6);
+                if (fcs_code == 0 and ss == 1) {
+                    need += 1; // single-segment 1-byte FCS
+                } else {
+                    need += constants.fcs_field_size[fcs_code];
+                }
+                if (slice.len < need) break;
+
                 const fh = try header_mod.getFrameHeader(slice);
                 self.frame_header = fh;
                 in_consumed += fh.header_size;

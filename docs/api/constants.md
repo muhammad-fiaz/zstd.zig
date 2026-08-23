@@ -76,3 +76,14 @@ std.debug.print("Default level: {d}\n", .{zstd.defaultCLevel()});
 ```
 
 > Removed: old `zstd.constants.magic_number`, `zstd.version.number/string`, `zstd.version.clevel_min/max/default` no longer exist — use top-level `zstd.MAGICNUMBER`, `zstd.versionString()`, `zstd.versionNumber()`, `zstd.minCLevel()` etc. Also `zstd.CLEVEL_DEFAULT` is available.
+
+## Version Constants
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `zstd.version` | `"0.0.3"` | This library's release version |
+| `zstd.version_number` | `3` | Numeric library version |
+| `zstd.spec_version` | `"1.6.0"` | Zstandard format specification implemented |
+| `zstd.spec_version_number` | `10600` | Numeric specification version |
+
+Helpers: `zstd.versionString()`, `zstd.versionNumber()`, `zstd.specVersionString()`, `zstd.specVersionNumber()`.

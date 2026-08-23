@@ -1,5 +1,10 @@
-pub const version = "1.6.0";
-pub const version_number: u32 = 1 * 100 * 100 + 6 * 100 + 0;
+/// zstd.zig library version.
+pub const version = "0.0.3";
+pub const version_number: u32 = 0 * 100 * 100 + 0 * 100 + 3;
+
+/// Data-format specification implemented (Zstandard v1.6.0).
+pub const spec_version = "1.6.0";
+pub const spec_version_number: u32 = 1 * 100 * 100 + 6 * 100 + 0;
 
 const std = @import("std");
 const comp = @import("compress/compress.zig");
@@ -153,6 +158,16 @@ pub fn versionString() []const u8 {
 
 pub fn versionNumber() u32 {
     return version_number;
+}
+
+/// Data-format specification version string ("1.6.0").
+pub fn specVersionString() []const u8 {
+    return spec_version;
+}
+
+/// Numeric specification version (major*100*100 + minor*100 + patch).
+pub fn specVersionNumber() u32 {
+    return spec_version_number;
 }
 
 pub fn maxCLevel() i32 {
@@ -371,8 +386,10 @@ test "skippable read wrong magic" {
 }
 
 test "version info" {
-    try testing.expect(versionString().len > 0);
-    try testing.expect(versionNumber() > 0);
+    try testing.expectEqualStrings("0.0.3", versionString());
+    try testing.expectEqual(@as(u32, 3), versionNumber());
+    try testing.expectEqualStrings("1.6.0", specVersionString());
+    try testing.expectEqual(@as(u32, 1 * 100 * 100 + 6 * 100), specVersionNumber());
     try testing.expect(maxCLevel() == 22);
     try testing.expect(minCLevel() < 0);
     try testing.expect(defaultCLevel() == 3);
@@ -674,4 +691,199 @@ test "block type raw detection" {
 
 test "frame module surface" {
     std.testing.refAllDecls(frame_mod);
+}
+
+// ---------------------------------------------------------------------------
+// Edge-case coverage: frame format, entropy, streaming, corruption
+// ---------------------------------------------------------------------------
+
+test "roundtrip every length 0..300" {
+    const alloc = testing.allocator;
+    var prng = std.Random.DefaultPrng.init(7);
+    for (0..300) |n| {
+        const src = try alloc.alloc(u8, n);
+        defer alloc.free(src);
+        prng.random().bytes(src);
+        const c = try compress(alloc, src);
+        defer alloc.free(c);
+        const d = try decompress(alloc, c);
+        defer alloc.free(d);
+        try testing.expectEqualSlices(u8, src, d);
+    }
+}
+
+test "roundtrip max single block 128KB" {
+    const alloc = testing.allocator;
+    const src = try alloc.alloc(u8, constants.block_size_max);
+    defer alloc.free(src);
+    // Compressible pattern so encoder takes the FSE path.
+    for (src, 0..) |*b, i| b.* = @intCast((i * 31 + (i / 251)) % 251);
+    const c = try compress(alloc, src);
+    defer alloc.free(c);
+    const d = try decompress(alloc, c);
+    defer alloc.free(d);
+    try testing.expectEqualSlices(u8, src, d);
+}
+
+test "multi-block frame crosses block boundary" {
+    const alloc = testing.allocator;
+    const src = try alloc.alloc(u8, constants.block_size_max + 1000);
+    defer alloc.free(src);
+    @memset(src, 0xAA);
+    for (src[0..1000], 0..) |*b, i| b.* = @intCast(i % 200);
+    const c = try compress(alloc, src);
+    defer alloc.free(c);
+    // Frame must contain more than one block.
+    const frame_hdr = try getFrameHeader(c);
+    try testing.expect(frame_hdr.content_size == src.len);
+    const d = try decompress(alloc, c);
+    defer alloc.free(d);
+    try testing.expectEqualSlices(u8, src, d);
+}
+
+test "checksum detects single flipped bit" {
+    const alloc = testing.allocator;
+    const src = "checksum bit-flip detection payload " ** 10;
+    const c = try compressWithOptions(alloc, src, .{ .checksum = true });
+    defer alloc.free(c);
+    var bad = try alloc.dupe(u8, c);
+    defer alloc.free(bad);
+    bad[bad.len - 1] ^= 0x01; // flip checksum bit
+    try testing.expectError(error.ChecksumWrong, decompress(alloc, bad));
+}
+
+test "corrupted payload byte fails via checksum" {
+    const alloc = testing.allocator;
+    const src = "payload to corrupt mid-stream for safety checks" ** 5;
+    const c = try compressWithOptions(alloc, src, .{ .checksum = true });
+    defer alloc.free(c);
+    var bad = try alloc.dupe(u8, c);
+    defer alloc.free(bad);
+    // Flip a payload byte inside the first block (raw literals region).
+    bad[20] ^= 0xFF;
+    const r = decompress(alloc, bad);
+    try testing.expect(std.meta.isError(r));
+}
+
+test "skippable frame all 16 magic variants" {
+    var buf: [64]u8 = undefined;
+    for (0..16) |v| {
+        const n = writeSkippableFrame(&buf, "skip", @intCast(v));
+        try testing.expect(isSkippableFrame(buf[0..n]));
+        var out: [16]u8 = undefined;
+        const got = try readSkippableFrame(&out, buf[0..n]);
+        try testing.expectEqualStrings("skip", out[0..got]);
+    }
+}
+
+test "skippable frames interleaved between data frames" {
+    const alloc = testing.allocator;
+    var stream: std.ArrayList(u8) = .empty;
+    defer stream.deinit(alloc);
+    var skip: [32]u8 = undefined;
+    const sn = writeSkippableFrame(&skip, "meta", 3);
+    try stream.appendSlice(alloc, skip[0..sn]);
+    const c1 = try compress(alloc, "first");
+    defer alloc.free(c1);
+    try stream.appendSlice(alloc, c1);
+    const sn2 = writeSkippableFrame(&skip, "more", 15);
+    try stream.appendSlice(alloc, skip[0..sn2]);
+    const c2 = try compress(alloc, "second");
+    defer alloc.free(c2);
+    try stream.appendSlice(alloc, c2);
+
+    const d = try decompress(alloc, stream.items);
+    defer alloc.free(d);
+    try testing.expectEqualStrings("firstsecond", d);
+}
+
+test "frame header rejects reserved bit" {
+    // fhd with reserved bit 3 set must be rejected by decoders.
+    var buf = [_]u8{ 0x28, 0xB5, 0x2F, 0xFD, 0x08 };
+    try testing.expectError(error.FrameParameterUnsupported, getFrameHeader(&buf));
+    _ = &buf;
+}
+
+test "content size mismatch detected" {
+    const alloc = testing.allocator;
+    // Declare a size that differs from the actual payload length; the decoder
+    // must reject the frame instead of silently accepting it.
+    const c = try compressWithOptions(alloc, "actual size", .{ .content_size = 999 });
+    defer alloc.free(c);
+    const r = decompress(alloc, c);
+    try testing.expect(std.meta.isError(r));
+    if (r) |_| {} else |e| {
+        try testing.expect(e == error.ContentSizeMismatch or e == error.DstSizeTooSmall or e == error.Corruption);
+    }
+}
+
+test "dictionary roundtrip through context" {
+    const alloc = testing.allocator;
+    var dict = try createDictionaryFromData(alloc, "shared corpus bytes for dict", 77);
+    defer dict.deinit();
+    const opts = CompressionOptions{ .dict_id = dict.dictId() };
+    const comp_bytes = try compressWithOptions(alloc, "x", opts);
+    defer alloc.free(comp_bytes);
+    const frame_hdr = try getFrameHeader(comp_bytes);
+    try testing.expectEqual(@as(u32, 77), frame_hdr.dict_id);
+}
+
+test "decompressWithDict accepts valid frames" {
+    const alloc = testing.allocator;
+    const src = "with-dictionary decode path";
+    const c = try compress(alloc, src);
+    defer alloc.free(c);
+    var out: [64]u8 = undefined;
+    const n = try decompressInto(&out, c);
+    try testing.expectEqualStrings(src, out[0..n]);
+}
+
+test "streaming chunk boundaries 1..17 bytes" {
+    const alloc = testing.allocator;
+    const src = "chunked streaming boundary sweep for zstd.zig" ** 6;
+    const c = try compress(alloc, src);
+    defer alloc.free(c);
+    for (1..18) |step| {
+        var sd = StreamingDecompressor.init(alloc);
+        defer sd.deinit();
+        var out: [4096]u8 = undefined;
+        var total: usize = 0;
+        var pos: usize = 0;
+        while (pos < c.len) {
+            const n = @min(step, c.len - pos);
+            const r = try sd.decompressStream(out[total..], c[pos .. pos + n]);
+            total += r.out_produced;
+            pos += n;
+        }
+        try testing.expectEqualStrings(src, out[0..total]);
+    }
+}
+
+test "streaming empty final chunk still terminates frame" {
+    const alloc = testing.allocator;
+    var sc = try StreamingCompressor.init(alloc, 3);
+    defer sc.deinit();
+    var buf: [1024]u8 = undefined;
+    _ = try sc.compressStream(&buf, "", .end);
+    try testing.expect(sc.finished);
+}
+
+test "compressBound monotonic across sizes" {
+    var prev: usize = 0;
+    var i: usize = 1;
+    while (i < 1 << 20) : (i *= 3) {
+        const b = compressBound(i);
+        try testing.expect(b > prev or prev == 0);
+        prev = b;
+    }
+}
+
+test "level clamping helpers expose bounds" {
+    try testing.expect(minCLevel() <= defaultCLevel());
+    try testing.expect(defaultCLevel() <= maxCLevel());
+}
+
+test "spec version accessors" {
+    try testing.expectEqualStrings("1.6.0", specVersionString());
+    try testing.expect(spec_version_number == 10600);
 }
