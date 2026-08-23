@@ -17,3 +17,11 @@ pub const BlockProperties = struct {
     last_block: bool,
     orig_size: u32,
 };
+
+const testing = @import("std").testing;
+
+test "types BlockType" {
+    try testing.expectEqual(BlockType.raw, @as(BlockType, .raw));
+    try testing.expectEqual(BlockType.rle, @as(BlockType, .rle));
+    try testing.expectEqual(BlockType.compressed, @as(BlockType, .compressed));
+}

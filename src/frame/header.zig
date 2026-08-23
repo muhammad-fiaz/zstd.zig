@@ -231,3 +231,62 @@ fn writeLE64(p: []u8, v: u64) void {
     p[6] = @truncate(v >> 48);
     p[7] = @truncate(v >> 56);
 }
+
+const testing = std.testing;
+
+test "frame header write and parse roundtrip" {
+    var buf: [18]u8 = undefined;
+    const n = writeFrameHeader(&buf, 256, 1 << 20, 0, false, false);
+    try testing.expect(n >= 5);
+    const fh = try getFrameHeader(buf[0..n]);
+    try testing.expectEqual(@as(u64, 256), fh.content_size);
+    try testing.expect(fh.block_size_max > 0);
+    try testing.expect(!fh.checksum_flag);
+}
+
+test "frame header with checksum" {
+    var buf: [18]u8 = undefined;
+    const n = writeFrameHeader(&buf, 100, 1 << 20, 0, true, false);
+    const fh = try getFrameHeader(buf[0..n]);
+    try testing.expect(fh.checksum_flag);
+}
+
+test "frame header unknown content size" {
+    var buf: [18]u8 = undefined;
+    const n = writeFrameHeader(&buf, 0, 1 << 20, 0, false, true);
+    try testing.expect(n >= 5);
+}
+
+test "frame header dictionary id" {
+    var buf: [18]u8 = undefined;
+    const n = writeFrameHeader(&buf, 50, 1 << 20, 42, false, false);
+    const fh = try getFrameHeader(buf[0..n]);
+    try testing.expectEqual(@as(u32, 42), fh.dict_id);
+}
+
+test "isSkippableFrame valid" {
+    var buf: [16]u8 = undefined;
+    buf[0] = 0x50;
+    buf[1] = 0x2A;
+    buf[2] = 0x4D;
+    buf[3] = 0x18;
+    buf[4] = 5;
+    buf[5] = 0;
+    buf[6] = 0;
+    buf[7] = 0;
+    @memcpy(buf[8..13], "hello");
+    try testing.expect(isSkippableFrame(buf[0..13]));
+}
+
+test "isSkippableFrame false for zstd" {
+    var buf: [8]u8 = undefined;
+    buf[0] = 0x28;
+    buf[1] = 0xB5;
+    buf[2] = 0x2F;
+    buf[3] = 0xFD;
+    buf[4] = 0;
+    buf[5] = 0;
+    buf[6] = 0;
+    buf[7] = 0;
+    try testing.expect(!isSkippableFrame(&buf));
+}

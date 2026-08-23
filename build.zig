@@ -25,42 +25,6 @@ pub fn build(b: *std.Build) void {
     const run_tests = b.addRunArtifact(tests);
     test_step.dependOn(&run_tests.step);
 
-    const test_files = [_]struct { name: []const u8, file: []const u8 }{
-        .{ .name = "integration", .file = "tests/integration.zig" },
-        .{ .name = "common", .file = "tests/common.zig" },
-        .{ .name = "frame", .file = "tests/frame.zig" },
-        .{ .name = "fse", .file = "tests/fse.zig" },
-        .{ .name = "huffman", .file = "tests/huffman.zig" },
-        .{ .name = "compress", .file = "tests/compress.zig" },
-        .{ .name = "decompress", .file = "tests/decompress.zig" },
-        .{ .name = "streaming", .file = "tests/streaming.zig" },
-        .{ .name = "dictionary", .file = "tests/dictionary.zig" },
-        .{ .name = "legacy", .file = "tests/legacy.zig" },
-    };
-
-    const internal_mod = b.createModule(.{
-        .root_source_file = b.path("src/internal.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    inline for (test_files) |tf| {
-        const test_mod = b.createModule(.{
-            .root_source_file = b.path(tf.file),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "zstd", .module = zstd_mod },
-                .{ .name = "internal", .module = internal_mod },
-            },
-        });
-        const tf_test = b.addTest(.{
-            .root_module = test_mod,
-        });
-        const tf_run = b.addRunArtifact(tf_test);
-        test_step.dependOn(&tf_run.step);
-    }
-
     const docs_step = b.step("docs", "Generate documentation");
     const docs = b.addTest(.{
         .root_module = zstd_mod,

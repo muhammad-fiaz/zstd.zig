@@ -80,3 +80,16 @@ pub fn getCompressionParameters(level: i32, src_size: usize, window_log: u8) Com
     if (window_log != 0) opts.window_log = @max(constants.window_log_min, @min(constants.window_log_max, window_log));
     return opts;
 }
+
+const testing = std.testing;
+
+test "CompressionOptions defaults" {
+    const opts = CompressionOptions{};
+    try testing.expectEqual(@as(i32, 3), opts.level);
+    try testing.expect(!opts.checksum);
+}
+
+test "compressBound returns value" {
+    const b = compressBound(100);
+    try testing.expect(b > 100);
+}

@@ -36,7 +36,7 @@ pub fn main() !void {
 ## Output
 
 ```text
-Advanced compress: 2250 -> 2264 (strategy=btlazy2, window_log=20)
+Advanced compress: 2250 -> 209 (strategy=btlazy2, window_log=20)
 Decompressed 2250 bytes, checksum validated
 ```
 

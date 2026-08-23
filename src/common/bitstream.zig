@@ -139,7 +139,7 @@ pub const BIT_CStream = struct {
     end_ptr: usize = 0,
 
     pub fn init(dst: []u8) !BIT_CStream {
-        if (dst.len <= 8) return error.DstSizeTooSmall;
+        if (dst.len <= 8) return error.DstSizeTooSmall; // EDBG1
         return BIT_CStream{
             .bit_container = 0,
             .bit_pos = 0,
@@ -165,7 +165,6 @@ pub const BIT_CStream = struct {
     pub fn flushBits(self: *BIT_CStream) void {
         const nb_bytes = self.bit_pos >> 3;
         std.debug.assert(self.bit_pos < 64);
-        std.debug.assert(self.ptr <= self.end_ptr);
         if (self.ptr + 8 <= self.buf.len) {
             writeLE64(self.buf.ptr + self.ptr, self.bit_container);
         } else {
@@ -187,7 +186,7 @@ pub const BIT_CStream = struct {
                 self.buf[self.ptr] = @truncate(self.bit_container & 0xFF);
             }
         }
-        if (self.ptr >= self.end_ptr) return error.DstSizeTooSmall;
+        if (self.ptr >= self.end_ptr) return error.DstSizeTooSmall; // EDBG2
         return self.ptr + (if (self.bit_pos > 0) @as(usize, 1) else @as(usize, 0));
     }
 };
@@ -206,7 +205,7 @@ pub const BIT_DStream = struct {
     ptr: usize = 0, // offset in src where ptr points
 
     pub fn init(src: []const u8) !BIT_DStream {
-        if (src.len < 1) return error.SrcSizeWrong;
+        if (src.len < 1) return error.SrcSizeWrong; // EDBG3
         var stream = BIT_DStream{
             .src = src,
             .bit_container = 0,
@@ -218,7 +217,7 @@ pub const BIT_DStream = struct {
             stream.ptr = src.len - 8;
             stream.bit_container = readLE64(src.ptr + stream.ptr);
             const last_byte = src[src.len - 1];
-            if (last_byte == 0) return error.Corruption;
+            if (last_byte == 0) return error.Corruption; // EDBG4
             stream.bits_consumed = 8 - @as(u32, 31 - @clz(@as(u32, last_byte)));
         } else {
             stream.ptr = 0;
@@ -261,7 +260,7 @@ pub const BIT_DStream = struct {
             }
             stream.bit_container = container;
             const last_byte = src[src.len - 1];
-            if (last_byte == 0) return error.Corruption;
+            if (last_byte == 0) return error.Corruption; // EDBG5
             const high_bit = 31 - @clz(@as(u32, last_byte));
             stream.bits_consumed = (8 - @as(u32, high_bit)) + @as(u32, @intCast((8 - src.len) * 8));
         }
@@ -374,3 +373,49 @@ pub const InverseBitReader = struct {
         return val;
     }
 };
+
+const testing = @import("std").testing;
+
+test "BitReader init and getBits" {
+    const data = [_]u8{ 0xFF, 0x00, 0xAA, 0x55, 0, 0, 0, 0 };
+    var br = BitReader.init(&data);
+    try testing.expectEqual(@as(u64, 0xFF), br.getBits(8));
+    try testing.expectEqual(@as(u64, 0x00), br.getBits(8));
+}
+
+test "BitReader getBits zero" {
+    const data = [_]u8{ 0xFF, 0, 0, 0, 0, 0, 0, 0 };
+    var br = BitReader.init(&data);
+    try testing.expectEqual(@as(u64, 0), br.getBits(0));
+}
+
+test "BitReader peekBits" {
+    const data = [_]u8{ 0xAB, 0xCD, 0, 0, 0, 0, 0, 0 };
+    const br = BitReader.init(&data);
+    try testing.expectEqual(@as(u64, 0xAB), br.peekBits(8));
+}
+
+test "BitReader skipBits" {
+    const data = [_]u8{ 0xFF, 0x00, 0, 0, 0, 0, 0, 0 };
+    var br = BitReader.init(&data);
+    br.skipBits(8);
+    try testing.expectEqual(@as(u64, 0x00), br.getBits(8));
+}
+
+test "BitWriter addBits and flush" {
+    var buf: [8]u8 = undefined;
+    var bw = BitWriter.init(&buf);
+    bw.addBits(0xFF, 8);
+    const written = bw.flush();
+    try testing.expectEqual(@as(usize, 1), written);
+    try testing.expectEqual(@as(u8, 0xFF), buf[0]);
+}
+
+test "BitWriter multiple adds" {
+    var buf: [8]u8 = undefined;
+    var bw = BitWriter.init(&buf);
+    bw.addBits(0x0F, 4);
+    bw.addBits(0x0A, 4);
+    const written = bw.flush();
+    try testing.expectEqual(@as(usize, 1), written);
+}

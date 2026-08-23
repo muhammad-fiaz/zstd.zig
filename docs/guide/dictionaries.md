@@ -3,6 +3,9 @@ title: Dictionaries
 description: Use dictionary compression for better ratios on similar data.
 ---
 
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig — every algorithm, frame element, and default table in this document follows that version.
+
+
 # Dictionaries
 
 Dictionary compression achieves significantly better compression ratios when compressing many similar small buffers (e.g., database records, JSON objects, log entries).

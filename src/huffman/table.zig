@@ -60,3 +60,12 @@ pub fn buildTableFromWeights(allocator: std.mem.Allocator, weights: []const u8, 
         .val = val,
     };
 }
+
+const testing = std.testing;
+
+test "buildTableFromWeights basic" {
+    const weights = [_]u8{ 4, 3, 2, 1 };
+    var tbl = try buildTableFromWeights(testing.allocator, &weights, 4);
+    defer tbl.deinit(testing.allocator);
+    try testing.expectEqual(@as(u8, 4), tbl.max_bits);
+}

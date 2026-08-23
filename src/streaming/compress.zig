@@ -121,3 +121,70 @@ pub const StreamingCompressor = struct {
 };
 
 pub const CStream = StreamingCompressor;
+
+const testing = std.testing;
+
+test "StreamingCompressor init and deinit" {
+    var sc = try StreamingCompressor.init(testing.allocator, 3);
+    defer sc.deinit();
+}
+
+test "StreamingCompressor initWithOptions" {
+    const opts = compress_mod.CompressionOptions{ .level = 5 };
+    var sc = StreamingCompressor.initWithOptions(testing.allocator, opts);
+    defer sc.deinit();
+}
+
+test "StreamingCompressor cont then end" {
+    var sc = try StreamingCompressor.init(testing.allocator, 3);
+    defer sc.deinit();
+    var buf: [4096]u8 = undefined;
+    const r1 = try sc.compressStream(&buf, "hello ", .cont);
+    try testing.expect(r1.in_consumed == 6 or r1.remaining > 0);
+    const r2 = try sc.compressStream(&buf, "world", .end);
+    try testing.expect(r2.out_produced > 0);
+}
+
+test "StreamingCompressor flush" {
+    var sc = try StreamingCompressor.init(testing.allocator, 3);
+    defer sc.deinit();
+    var buf: [4096]u8 = undefined;
+    _ = try sc.compressStream(&buf, "data", .flush);
+    try testing.expect(!sc.finished);
+}
+
+test "StreamingCompressor end writes empty block" {
+    var sc = try StreamingCompressor.init(testing.allocator, 3);
+    defer sc.deinit();
+    var buf: [4096]u8 = undefined;
+    const r = try sc.compressStream(&buf, "", .end);
+    try testing.expect(r.out_produced > 0);
+    try testing.expect(sc.finished);
+}
+
+test "StreamingCompressor setChecksumFlag" {
+    var sc = try StreamingCompressor.init(testing.allocator, 3);
+    defer sc.deinit();
+    sc.setChecksumFlag(true);
+    var buf: [4096]u8 = undefined;
+    const r = try sc.compressStream(&buf, "checksum data", .end);
+    try testing.expect(r.out_produced > 0);
+}
+
+test "StreamingCompressor setPledgedSrcSize" {
+    var sc = try StreamingCompressor.init(testing.allocator, 3);
+    defer sc.deinit();
+    sc.setPledgedSrcSize(100);
+    var buf: [4096]u8 = undefined;
+    _ = try sc.compressStream(&buf, "pledged", .end);
+}
+
+test "StreamingCompressor reset" {
+    var sc = try StreamingCompressor.init(testing.allocator, 3);
+    defer sc.deinit();
+    var buf: [4096]u8 = undefined;
+    _ = try sc.compressStream(&buf, "first", .end);
+    sc.reset();
+    try testing.expect(!sc.finished);
+    try testing.expect(!sc.header_written);
+}

@@ -3,6 +3,9 @@ title: FrameHeader
 description: Inspect zstd frame metadata without decompressing.
 ---
 
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig — every algorithm, frame element, and default table in this document follows that version.
+
+
 # FrameHeader
 
 Functions and struct for inspecting zstd frame headers without decompressing the data. Defined in `src/common/types.zig:3` and `src/zstd.zig:89-132`, `src/frame/header.zig`.

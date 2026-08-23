@@ -5,6 +5,23 @@ description: Decompress data with zstd.zig and inspect frame metadata.
 
 # Decompression
 
+## Full Compressed-Block Support
+
+The decoder implements the complete Zstandard entropy layer natively, following the Zstandard 1.6.0 specification:
+
+| Feature | Status |
+|---------|--------|
+| `Raw_Block` / `RLE_Block` | ✅ |
+| `Compressed_Block` — raw / RLE literals | ✅ |
+| Huffman-coded literals (`set_compressed`) | ✅ single-stream & 4-stream, X1 flat tables |
+| Treeless literals (`set_repeat`, reuses prior table) | ✅ carried per-frame |
+| Sequence FSE modes: predefined / RLE / compressed / repeat | ✅ all four |
+| Repeat offsets (`prevOffset[3]` incl. litLength==0 edge cases) | ✅ |
+| Entropy + rep-offset carry-over across blocks in a frame | ✅ |
+| XXH64 content checksum validation | ✅ |
+
+Interoperability is verified bidirectionally against the official C `zstd` v1.6.0 CLI at levels 1–22 including `--ultra -22`.
+
 ## One-Shot Decompression
 
 ```zig

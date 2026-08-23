@@ -3,6 +3,9 @@ title: DecompressionContext
 description: Reusable decompression context.
 ---
 
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig — every algorithm, frame element, and default table in this document follows that version.
+
+
 # DecompressionContext
 
 A reusable decompression context for decompressing multiple buffers. Defined in `src/decompress/context.zig:6` and re-exported as `zstd.DecompressionContext` (`src/zstd.zig:24`).

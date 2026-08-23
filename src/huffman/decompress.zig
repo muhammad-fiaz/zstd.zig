@@ -17,59 +17,47 @@ const Entry = struct {
     nb_bits: u8,
 };
 
-pub fn buildDecoder(allocator: std.mem.Allocator, weights: []const u8) errors.ZstdError!HuffDecoder {
+/// Build an X1-style flat decoding table from explicit Huffman weights.
+/// `weights` must be complete (including the implied final symbol) such that
+/// sum(1 << (w-1)) == 1 << table_log, matching HUF_readStats validation.
+pub fn buildDecoder(allocator: std.mem.Allocator, weights: []const u8, table_log: u8) errors.ZstdError!HuffDecoder {
     if (weights.len == 0) return error.InvalidHuffmanTable;
-    var max_weight: u8 = 0;
+    if (table_log == 0 or table_log > 11) return error.InvalidHuffmanTable;
     for (weights) |w| {
-        if (w > max_weight) max_weight = w;
+        if (w > table_log) return error.InvalidHuffmanTable;
     }
-    if (max_weight == 0) return error.InvalidHuffmanTable;
-    if (max_weight > 11) return error.InvalidHuffmanTable;
 
-    const table_log = max_weight;
-    const table_size: usize = @as(usize, 1) << @as(std.math.Log2Int(usize), @intCast(table_log));
+    const table_size: usize = @as(usize, 1) << @intCast(table_log);
     const table = try allocator.alloc(Entry, table_size);
     errdefer allocator.free(table);
     @memset(table, Entry{ .symbol = 0, .nb_bits = 0 });
 
-    var rank_val = [_]u32{0} ** 12;
+    var rank_val = [_]u32{0} ** 13;
     for (weights) |w| {
-        if (w > 11) return error.InvalidHuffmanTable;
+        if (w == 0) continue; // zero-weight symbols are unused (C skips them)
         rank_val[w] += 1;
     }
 
-    var rank_start = [_]u32{0} ** 12;
-    var next_rank_start: u32 = 0;
-    for (0..table_log + 1) |n| {
-        const curr = next_rank_start;
-        next_rank_start += rank_val[n];
-        rank_start[n] = curr;
+    // Rank starts: cumulative cells consumed by lower weights.
+    var next_rank_start: usize = 0;
+    var rank_start: [13]usize = undefined;
+    for (1..table_log + 1) |n| {
+        rank_start[n] = next_rank_start;
+        next_rank_start += @as(usize, rank_val[n]) << @intCast(n - 1);
     }
+    if (next_rank_start != table_size) return error.InvalidHuffmanTable;
 
-    const symbols = try allocator.alloc(u8, weights.len);
-    defer allocator.free(symbols);
-
-    var cur_rank_start: [12]u32 = rank_start;
+    // Fill: for each symbol in ascending order, place its 2^(w-1) identical
+    // entries at the running position of its rank (HUF_readDTableX1_wksp).
+    var cursor: [13]usize = rank_start;
     for (weights, 0..) |w, sym| {
-        symbols[cur_rank_start[w]] = @intCast(sym);
-        cur_rank_start[w] += 1;
-    }
-
-    var symbol_idx = rank_val[0];
-    var u_start: usize = 0;
-    for (1..table_log + 1) |w| {
-        const symbol_count = rank_val[w];
+        if (w == 0) continue;
         const length: usize = @as(usize, 1) << @intCast(w - 1);
         const nb_bits: u8 = @intCast(table_log + 1 - w);
-
-        for (0..symbol_count) |s| {
-            const sym = symbols[symbol_idx + s];
-            for (0..length) |u| {
-                table[u_start + u] = Entry{ .symbol = sym, .nb_bits = nb_bits };
-            }
-            u_start += length;
-        }
-        symbol_idx += symbol_count;
+        const entry = Entry{ .symbol = @intCast(sym), .nb_bits = nb_bits };
+        const start = cursor[w];
+        for (0..length) |u| table[start + u] = entry;
+        cursor[w] += length;
     }
 
     return HuffDecoder{ .table = table, .max_bits = table_log, .allocator = allocator };
@@ -123,33 +111,52 @@ pub fn readStats(
         const ncount_read = try fse_decompress_mod.readNCount(fse_norm, &max_sv, &fse_tlog, compressed_header);
         if (fse_tlog > 6) return error.TableLogTooLarge;
 
-        const fse_dec = try fse_decompress_mod.buildDecoder(allocator, fse_norm[0 .. max_sv + 1], fse_tlog, max_sv);
-        var fse_dec_mut = fse_dec;
-        defer fse_dec_mut.deinit(allocator);
+        // Build the FSE table and decode weights with alternating two-state
+        // streaming.
+        const dtable_mod = @import("../fse/dtable.zig");
+        var dt = try dtable_mod.build(allocator, fse_norm[0 .. max_sv + 1], max_sv, fse_tlog);
+        defer dt.deinit();
 
         var dstream = try bitstream_mod.BIT_DStream.init(compressed_header[ncount_read..]);
-        var state1 = fse_decompress_mod.FseDState.init(&fse_dec, &dstream);
-        var state2 = fse_decompress_mod.FseDState.init(&fse_dec, &dstream);
 
-        var out_idx: usize = 0;
-        while (out_idx + 1 < huff_weight.len) {
-            _ = dstream.reload();
-            huff_weight[out_idx] = state1.decodeSymbol(&dstream);
-            out_idx += 1;
+        // FSE_initDState x2: each reads `log` bits as its starting state.
+        var s1: u16 = @intCast(dstream.readBits(dt.log));
+        var s2: u16 = @intCast(dstream.readBits(dt.log));
+
+        const omax = huff_weight.len - 1; // caller provides hwSize; max hwSize-1 symbols
+        var op: usize = 0;
+
+        // Main loop: while stream unfinished and room for 4 more symbols.
+        while (dstream.reload() == .unfinished and op < omax -| 3) {
+            huff_weight[op] = step(&dt, &dstream, &s1);
+            huff_weight[op + 1] = step(&dt, &dstream, &s2);
+            huff_weight[op + 2] = step(&dt, &dstream, &s1);
+            huff_weight[op + 3] = step(&dt, &dstream, &s2);
+            op += 4;
+        }
+
+        // Tail: alternate until overflow signals the final pair.
+        while (true) {
+            if (op > omax -| 2) return error.Corruption;
+            huff_weight[op] = step(&dt, &dstream, &s1);
+            op += 1;
             if (dstream.reload() == .overflow) {
-                huff_weight[out_idx] = state2.decodeSymbol(&dstream);
-                out_idx += 1;
+                if (op > omax -| 2) return error.Corruption;
+                huff_weight[op] = step(&dt, &dstream, &s2);
+                op += 1;
                 break;
             }
-            huff_weight[out_idx] = state2.decodeSymbol(&dstream);
-            out_idx += 1;
+            if (op > omax -| 2) return error.Corruption;
+            huff_weight[op] = step(&dt, &dstream, &s2);
+            op += 1;
             if (dstream.reload() == .overflow) {
-                huff_weight[out_idx] = state1.decodeSymbol(&dstream);
-                out_idx += 1;
+                if (op > omax -| 2) return error.Corruption;
+                huff_weight[op] = step(&dt, &dstream, &s1);
+                op += 1;
                 break;
             }
         }
-        o_size = out_idx;
+        o_size = op;
     }
 
     @memset(rank_stats[0..13], 0);
@@ -179,10 +186,21 @@ pub fn readStats(
     return ip;
 }
 
+/// One FSE decode step: emit symbol at `state`, then transition the state
+/// using its nb_bits fresh bits (FSE_decodeSymbol semantics).
+fn step(dt: *const @import("../fse/dtable.zig").DTable, ds: *bitstream_mod.BIT_DStream, state: *u16) u8 {
+    const e = dt.entries[state.*];
+    const low = ds.readBits(e.nb_bits);
+    state.* = e.new_state +% @as(u16, @truncate(low));
+    return @truncate(e.symbol);
+}
+
 pub fn decodeSingleStream(dst: []u8, src: []const u8, decoder: *const HuffDecoder) errors.ZstdError!void {
     var bit_stream = try bitstream_mod.BIT_DStream.init(src);
     const table_log = decoder.max_bits;
     const mask: u64 = (@as(u64, 1) << @as(std.math.Log2Int(u64), @intCast(table_log))) - 1;
+    // Compile-time switchable trace (kept for entropy debugging).
+    const trace = true;
 
     var p: usize = 0;
     const p_end = dst.len;
@@ -191,24 +209,28 @@ pub fn decodeSingleStream(dst: []u8, src: []const u8, decoder: *const HuffDecode
         while (bit_stream.reload() == .unfinished and p < p_end - 3) {
             const val1 = bit_stream.lookBits(table_log) & mask;
             const entry1 = decoder.table[@intCast(val1)];
+            if (trace) std.debug.print("h[{d}] look={d} sym={d} nb={d}\n", .{ p, val1, entry1.symbol, entry1.nb_bits });
             dst[p] = entry1.symbol;
             p += 1;
             bit_stream.skipBits(entry1.nb_bits);
 
             const val2 = bit_stream.lookBits(table_log) & mask;
             const entry2 = decoder.table[@intCast(val2)];
+            if (trace) std.debug.print("h[{d}] look={d} sym={d} nb={d}\n", .{ p, val2, entry2.symbol, entry2.nb_bits });
             dst[p] = entry2.symbol;
             p += 1;
             bit_stream.skipBits(entry2.nb_bits);
 
             const val3 = bit_stream.lookBits(table_log) & mask;
             const entry3 = decoder.table[@intCast(val3)];
+            if (trace) std.debug.print("h[{d}] look={d} sym={d} nb={d}\n", .{ p, val3, entry3.symbol, entry3.nb_bits });
             dst[p] = entry3.symbol;
             p += 1;
             bit_stream.skipBits(entry3.nb_bits);
 
             const val4 = bit_stream.lookBits(table_log) & mask;
             const entry4 = decoder.table[@intCast(val4)];
+            if (trace) std.debug.print("h[{d}] look={d} sym={d} nb={d}\n", .{ p, val4, entry4.symbol, entry4.nb_bits });
             dst[p] = entry4.symbol;
             p += 1;
             bit_stream.skipBits(entry4.nb_bits);
@@ -220,6 +242,7 @@ pub fn decodeSingleStream(dst: []u8, src: []const u8, decoder: *const HuffDecode
     while (p < p_end) {
         const val = bit_stream.lookBits(table_log) & mask;
         const entry = decoder.table[@intCast(val)];
+        if (trace) std.debug.print("t[{d}] look={d} sym={d} nb={d}\n", .{ p, val, entry.symbol, entry.nb_bits });
         dst[p] = entry.symbol;
         p += 1;
         bit_stream.skipBits(entry.nb_bits);
@@ -260,7 +283,7 @@ pub fn decompressHuffmanBlock(allocator: std.mem.Allocator, dst: []u8, src: []co
     var table_log: u8 = 0;
 
     const header_read = try readStats(&huff_weight, &rank_stats, &nb_symbols, &table_log, src, allocator);
-    var decoder = try buildDecoder(allocator, huff_weight[0..nb_symbols]);
+    var decoder = try buildDecoder(allocator, huff_weight[0..nb_symbols], table_log);
     defer decoder.deinit();
 
     const bitstream_data = src[header_read..];
@@ -270,4 +293,70 @@ pub fn decompressHuffmanBlock(allocator: std.mem.Allocator, dst: []u8, src: []co
         try decode4Streams(dst, bitstream_data, &decoder);
     }
     return dst.len;
+}
+
+const testing = std.testing;
+
+test "buildDecoder simple" {
+    // weights {2,1,1}: weightTotal = 2+1+1 = 4 -> table_log 2, 4 cells.
+    const weights = [_]u8{ 2, 1, 1 };
+    var dec = try buildDecoder(testing.allocator, &weights, 2);
+    defer dec.deinit();
+    try testing.expectEqual(@as(u8, 2), dec.max_bits);
+    try testing.expect(dec.table.len == 4);
+}
+
+test "buildDecoder single weight" {
+    // weights {2,2}: total = 2+2 = 4 -> table_log 2.
+    const weights = [_]u8{ 2, 2 };
+    var dec = try buildDecoder(testing.allocator, &weights, 2);
+    defer dec.deinit();
+    try testing.expectEqual(@as(u8, 2), dec.max_bits);
+}
+
+test "buildDecoder empty" {
+    const weights = [_]u8{};
+    const result = buildDecoder(testing.allocator, &weights, 2);
+    try testing.expectError(error.InvalidHuffmanTable, result);
+}
+
+test "buildDecoder all zero" {
+    const weights = [_]u8{ 0, 0, 0 };
+    const result = buildDecoder(testing.allocator, &weights, 2);
+    try testing.expectError(error.InvalidHuffmanTable, result); // total != table size
+}
+
+test "buildDecoder weight too large" {
+    const weights = [_]u8{ 3, 1 };
+    const result = buildDecoder(testing.allocator, &weights, 2); // w=3 > log=2
+    try testing.expectError(error.InvalidHuffmanTable, result);
+}
+
+test "buildDecoder symbols populated" {
+    const weights = [_]u8{ 2, 1, 1 };
+    var dec = try buildDecoder(testing.allocator, &weights, 2);
+    defer dec.deinit();
+    var found = [_]bool{ false, false, false };
+    for (dec.table) |e| {
+        if (e.symbol < 3) found[e.symbol] = true;
+    }
+    try testing.expect(found[0]);
+    try testing.expect(found[1]);
+    try testing.expect(found[2]);
+}
+
+test "decompressHuffmanBlock empty" {
+    var dst: [4]u8 = undefined;
+    const result = decompressHuffmanBlock(testing.allocator, &dst, &[_]u8{});
+    try testing.expectError(error.SrcSizeWrong, result);
+}
+
+test "decodeSingleStream" {
+    const weights = [_]u8{ 2, 1, 1 };
+    var dec = try buildDecoder(testing.allocator, &weights, 2);
+    defer dec.deinit();
+    var dst: [4]u8 = undefined;
+    var src: [4]u8 = undefined;
+    @memset(&src, 0);
+    decodeSingleStream(&dst, &src, &dec) catch {};
 }

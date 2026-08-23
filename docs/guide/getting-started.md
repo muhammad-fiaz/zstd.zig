@@ -3,6 +3,9 @@ title: Getting Started
 description: Get up and running with zstd.zig in minutes.
 ---
 
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig — every algorithm, frame element, and default table in this document follows that version.
+
+
 # Getting Started
 
 zstd.zig is a complete native Zig implementation of [Zstandard](https://facebook.github.io/zstd/) compression. No C bindings, no external dependencies â€” just Zig.
@@ -21,7 +24,7 @@ Add zstd.zig to your `build.zig.zon`:
 
 ```zig
 .zstd = .{
-    .url = "https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.2.tar.gz",
+    .url = "https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.3.tar.gz",
     .hash = "...",  // use zig fetch --save to get the hash
 },
 ```

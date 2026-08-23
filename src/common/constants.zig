@@ -145,3 +145,25 @@ pub fn compressBound(src_size: usize) usize {
     }
     return bound;
 }
+
+const testing = @import("std").testing;
+
+test "constants magic" {
+    try testing.expectEqual(@as(u32, 0xFD2FB528), magic_number);
+    try testing.expectEqual(@as(u32, 0xEC30A437), magic_dictionary);
+    try testing.expectEqual(@as(u32, 0x184D2A50), magic_skippable_start);
+}
+
+test "constants limits" {
+    try testing.expect(block_size_max == 1 << 17);
+    try testing.expect(window_log_min == 10);
+    try testing.expect(c_level_default == 3);
+    try testing.expect(c_level_max == 22);
+}
+
+test "compressBound" {
+    const b1 = compressBound(100);
+    const b2 = compressBound(1000);
+    try testing.expect(b1 > 100);
+    try testing.expect(b2 > b1);
+}

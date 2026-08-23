@@ -9,3 +9,11 @@ pub const Workspace = struct {
         self.allocator.free(self.buffer);
     }
 };
+
+const testing = @import("std").testing;
+
+test "workspace init and deinit" {
+    var ws = try Workspace.init(testing.allocator, 1024);
+    defer ws.deinit();
+    try testing.expectEqual(@as(usize, 1024), ws.buffer.len);
+}

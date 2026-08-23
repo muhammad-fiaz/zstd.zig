@@ -32,8 +32,8 @@ pub fn main() !void {
 
 ```text
 Original: 171 bytes
-Compressed: 180 bytes
-Ratio: 105.26%
+Compressed: 103 bytes
+Ratio: 60.23%
 Round-trip verified: 171 bytes
 ```
 

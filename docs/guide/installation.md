@@ -3,6 +3,9 @@ title: Installation
 description: How to install and set up zstd.zig in your Zig project.
 ---
 
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig — every algorithm, frame element, and default table in this document follows that version.
+
+
 # Installation
 
 ## Requirements
@@ -21,15 +24,15 @@ This library requires **Zig 0.16.0** as declared in `build.zig.zon` (`minimum_zi
 ### Method 1: Zig Fetch (Recommended) â€” Latest Release
 
 ```bash
-zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.2.tar.gz
+zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.3.tar.gz
 ```
 
-This corresponds to `build.zig.zon` version `0.0.2`:
+This corresponds to `build.zig.zon` version `0.0.3`:
 
 ```zig
 .{
     .name = .zstd,
-    .version = "0.0.2",
+    .version = "0.0.3",
     .minimum_zig_version = "0.16.0",
     // ...
 }
@@ -50,7 +53,7 @@ Add the dependency to your `build.zig.zon`:
 ```zig
 .dependencies = .{
     .zstd = .{
-        .url = "https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.2.tar.gz",
+        .url = "https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.3.tar.gz",
         .hash = "...", // Run `zig fetch --save <url>` to generate the hash.
     },
 },
@@ -109,7 +112,7 @@ defer allocator.free(decompressed);
 ```bash
 zig build                    # Build library
 zig build test --summary all # Run all tests
-zig build run-all-examples   # Run all 11 examples
+zig build run-all-examples   # Run all 12 examples
 ```
 
 If all tests pass, zstd.zig is properly installed.

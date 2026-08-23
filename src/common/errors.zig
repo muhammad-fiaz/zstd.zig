@@ -77,3 +77,26 @@ pub fn errorToString(err: ZstdError) []const u8 {
         error.OutOfMemory => "out_of_memory",
     };
 }
+
+const testing = @import("std").testing;
+
+test "errors all strings non-empty" {
+    const errs = [_]ZstdError{
+        error.Corruption,                error.ChecksumWrong,               error.DictionaryCorrupted,
+        error.DictionaryWrong,           error.ParameterOutOfBound,         error.TableLogTooLarge,
+        error.MaxSymbolValueTooLarge,    error.MaxSymbolValueTooSmall,      error.StageWrong,
+        error.InitMissing,               error.MemoryAllocation,            error.WorkspaceTooSmall,
+        error.DstSizeTooSmall,           error.SrcSizeWrong,                error.DstBufferNull,
+        error.NoForwardProgressDestFull, error.NoForwardProgressInputEmpty, error.FrameIndexTooLarge,
+        error.PrefixUnknown,             error.VersionUnsupported,          error.FrameParameterUnsupported,
+        error.WindowTooLarge,            error.UnsupportedFeature,          error.InvalidMagic,
+        error.InvalidFrameHeader,        error.InvalidBlock,                error.InvalidBlockSize,
+        error.InvalidDictionary,         error.InvalidFseTable,             error.InvalidHuffmanTable,
+        error.InvalidSequence,           error.InvalidOffset,               error.ContentSizeMismatch,
+        error.AllocationFailure,         error.GenericError,                error.OutOfMemory,
+    };
+    for (errs) |e| {
+        const s = errorToString(e);
+        try testing.expect(s.len > 0);
+    }
+}

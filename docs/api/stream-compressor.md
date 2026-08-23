@@ -3,6 +3,9 @@ title: StreamingCompressor
 description: Chunk-based streaming compression for large data.
 ---
 
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig — every algorithm, frame element, and default table in this document follows that version.
+
+
 # StreamingCompressor
 
 Process data in chunks for streaming compression. Useful when data doesn't fit in memory. Defined in `src/streaming/compress.zig:11` and re-exported as `zstd.StreamingCompressor` / `zstd.CStream` (`src/zstd.zig:28-30`).

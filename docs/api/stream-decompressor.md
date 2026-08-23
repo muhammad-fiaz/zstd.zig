@@ -3,6 +3,9 @@ title: StreamingDecompressor
 description: Chunk-based streaming decompression for large data.
 ---
 
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig — every algorithm, frame element, and default table in this document follows that version.
+
+
 # StreamingDecompressor
 
 Process compressed data in chunks for streaming decompression. Defined in `src/streaming/decompress.zig:11` and re-exported as `zstd.StreamingDecompressor` / `zstd.DStream` (`src/zstd.zig:29-31`).
