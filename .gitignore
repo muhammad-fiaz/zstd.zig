@@ -24,3 +24,4 @@ example_restored.txt
 *~
 # Reference C implementation checkout (local only)
 zstd/
+temp_*.py
