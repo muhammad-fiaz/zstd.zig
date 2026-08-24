@@ -36,3 +36,5 @@ features:
   - title: Idiomatic Zig API
     details: "Options structs, enums, and comptime features. The API feels natural in Zig with named parameters and clean error handling."
 ---
+
+> zstd.zig follows the Zstandard 1.6.0 specification natively in Zig.

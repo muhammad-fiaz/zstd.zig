@@ -31,19 +31,25 @@
 > If you build with zstd.zig, make sure to give it a star.
 
 > [!NOTE]
-> This implementation is based on **Zstandard 1.6.0** as reference, providing complete native Zig support for the latest Zstandard specifications as well as transparent backwards-compatibility for legacy frame versions (**v01 through v07**).
+> This implementation follows the **Zstandard 1.6.0 specification**: all algorithms, formats, and logic are implemented natively in Zig to that specification, with transparent backwards-compatibility for legacy frame versions (**v01 through v07**).
+>
+> **Versioning:** \zstd.version\ tracks this library's release (0.0.3); \zstd.spec_version\ tracks the Zstandard format specification it implements (1.6.0).
 >
 > **Pure Zig — zero C dependencies:** Unlike binding-based approaches, `zstd.zig` implements the Zstandard format directly in Zig, including:
 > - **Frame format** with magic number validation, content size detection, and checksum verification
-> - **Block structure** with raw, RLE, and compressed block types
-> - **Huffman coding** for literal compression and decompression
-> - **FSE (Finite State Entropy)** table construction and decoding for sequence compression
-> - **LZ77** back-reference matching for sliding window compression
+> - **Full compressed-block decoding** — raw, RLE, and compressed blocks with Huffman-coded literals (single & 4-stream) and FSE-coded sequences
+> - **Huffman coding** — `HUF_readStats` weight tables, X1-style flat decode tables, single-stream and 4-stream literal decoding
+> - **FSE (Finite State Entropy)** — `FSE_readNCount` compact table parsing, C-exact decoding-table construction (`(next << nbBits) - size` transitions), predefined/RLE/compressed/repeat symbol modes
+> - **Repeat-offset semantics** — full `prevOffset[3]` history with litLength==0 edge cases, carried across blocks within a frame exactly like `ZSTD_DCtx`
+> - **Entropy carry-over** — Huffman and FSE tables persist across blocks in a frame; repeat modes (`set_repeat`) supported after first use
+> - **LZ77** back-reference matching with sliding-window history spanning prior blocks
 > - **Dictionary support** with Dictionary and DictionaryBuilder for trained dictionaries
 > - **Streaming API** with StreamingCompressor/StreamingDecompressor for chunked data processing
 > - **Parameter API** for fine-tuning compression level, window size, hash tables, and strategies
 > - **Frame inspection** for metadata extraction without full decompression
 > - **Legacy frames** transparent detection and decompression for legacy formats (v01, v02, v03, v04, v05, v06, v07)
+>
+> **Interoperability verified:** every frame produced by this library decodes byte-for-byte with the official `zstd` CLI, and frames from the official encoder at all levels 1–22 (including `--ultra`, multi-block, skippable frames, checksums) decode byte-for-byte here.
 
 ---
 
@@ -133,10 +139,10 @@ zig build test -Dtarget=aarch64-linux --summary all -fqemu
 
 ### Method 1: Zig Fetch (Recommended)
 
-**Latest Release (v0.0.2)**
+**Latest Release (v0.0.3)**
 
 ```bash
-zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.2.tar.gz
+zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.3.tar.gz
 ```
 
 ### Method 2: Zig Fetch (Main Branch)
@@ -154,7 +160,7 @@ Add the dependency to your `build.zig.zon` file.
 ```zig
 .dependencies = .{
     .zstd = .{
-        .url = "https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.2.tar.gz",
+        .url = "https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.3.tar.gz",
         .hash = "...", // Run `zig fetch --save <url>` to generate the hash.
     },
 },
@@ -422,6 +428,10 @@ zig build test -Dtarget=aarch64-linux --summary all -fqemu
 zig build test -Dtarget=x86-windows --summary all
 ```
 
+### Reference Interop Verification
+
+Bidirectional interoperability was verified against the official C `zstd` v1.6.0 CLI (built from `zstd/` via its own CMake): Zig-compressed frames decode with the official tool, and officially compressed frames at levels 1, 3, 9, 12, 16, 19 and `--ultra -22` — covering multi-block frames, 4-stream Huffman literals, FSE table compression/repeat modes, repeat offsets, RLE blocks, and XXH64 checksums — decode here byte-for-byte.
+
 For explicit cross-target test compilation:
 
 ```bash
@@ -450,6 +460,10 @@ Contributions are welcome! Please:
 6. Submit a pull request
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+
+## Security
+
+Found a security vulnerability? Please do **not** open a public issue. See [SECURITY.md](SECURITY.md) for responsible disclosure and supported versions.
 
 ## License
 

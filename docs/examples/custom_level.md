@@ -34,12 +34,12 @@ pub fn main() !void {
 ## Output
 
 ```text
-Level 1: 1060 -> 1070 bytes (100.9%)
-Level 3: 1060 -> 1070 bytes (100.9%)
-Level 6: 1060 -> 1070 bytes (100.9%)
-Level 9: 1060 -> 1070 bytes (100.9%)
-Level 15: 1060 -> 1070 bytes (100.9%)
-Level 19: 1060 -> 1070 bytes (100.9%)
+Level 1: 1060 -> 123 bytes (11.6%)
+Level 3: 1060 -> 123 bytes (11.6%)
+Level 6: 1060 -> 123 bytes (11.6%)
+Level 9: 1060 -> 123 bytes (11.6%)
+Level 15: 1060 -> 123 bytes (11.6%)
+Level 19: 1060 -> 123 bytes (11.6%)
 ```
 
 *For this medium-entropy text, levels 1-19 all emit `Raw_Block`/`RLE_Block` (ratio ~100%). More repetitive data shows better ratios at higher levels. `minCLevel() = -131072`, `maxCLevel() = 22`, `defaultCLevel() = 3`.*

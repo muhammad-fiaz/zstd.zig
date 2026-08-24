@@ -407,3 +407,40 @@ pub const FseCState = struct {
         bit_stream.addBits(self.value & ((@as(usize, 1) << @as(std.math.Log2Int(usize), @intCast(self.state_log))) - 1), self.state_log);
     }
 };
+
+const testing = std.testing;
+
+test "countFrequencies basic" {
+    var counts: [256]u32 = undefined;
+    const src = [_]u8{ 0, 0, 1, 2, 2, 2, 3 };
+    const max_sym = countFrequencies(&counts, &src, 3);
+    try testing.expectEqual(@as(usize, 3), max_sym);
+    try testing.expectEqual(@as(u32, 2), counts[0]);
+    try testing.expectEqual(@as(u32, 1), counts[1]);
+    try testing.expectEqual(@as(u32, 3), counts[2]);
+    try testing.expectEqual(@as(u32, 1), counts[3]);
+}
+
+test "countFrequencies empty" {
+    var counts: [256]u32 = undefined;
+    const src = [_]u8{};
+    const max_sym = countFrequencies(&counts, &src, 5);
+    try testing.expectEqual(@as(usize, 0), max_sym);
+}
+
+test "countFrequencies single symbol" {
+    var counts: [256]u32 = undefined;
+    const src = [_]u8{ 42, 42, 42 };
+    const max_sym = countFrequencies(&counts, &src, 42);
+    try testing.expectEqual(@as(usize, 42), max_sym);
+    try testing.expectEqual(@as(u32, 3), counts[42]);
+}
+
+test "normalizeCounts basic" {
+    var normalized: [32]i16 = undefined;
+    const counts = [_]u32{ 10, 5, 3 };
+    try normalizeCounts(&normalized, &counts, 5, 18);
+    try testing.expect(normalized[0] > 0);
+    try testing.expect(normalized[1] > 0);
+    try testing.expect(normalized[2] > 0);
+}

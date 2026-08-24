@@ -32,7 +32,7 @@ scoop install zig
 
 ```bash
 zig build            # Build library
-zig build test       # Run all tests (35+)
+zig build test       Run all tests (150+)
 zig build docs       # Build documentation site
 ```
 

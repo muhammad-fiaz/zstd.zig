@@ -42,3 +42,20 @@ pub fn decompressLegacy(dst: []u8, src: []const u8) errors.ZstdError!Result {
         else => return error.VersionUnsupported,
     }
 }
+
+const testing = std.testing;
+
+test "decoder isLegacy" {
+    const data = [_]u8{ 0x21, 0xB5, 0x2F, 0xFD };
+    try testing.expect(isLegacy(&data));
+}
+
+test "decoder isLegacy false" {
+    const data = [_]u8{ 0x28, 0xB5, 0x2F, 0xFD };
+    try testing.expect(!isLegacy(&data));
+}
+
+test "decoder findFrameSize v01 short" {
+    const data = [_]u8{ 0x21, 0xB5, 0x2F, 0xFD };
+    try testing.expectError(error.SrcSizeWrong, findFrameSize(&data));
+}

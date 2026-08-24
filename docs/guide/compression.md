@@ -22,6 +22,21 @@ defer allocator.free(compressed);
 pub fn compress(allocator: std.mem.Allocator, src: []const u8) anyerror![]u8
 ```
 
+## Compressed Block Encoding
+
+Compression follows the Zstandard 1.6.0 specification: block headers,
+literal sections, and FSE-encoded sequence sections all conform exactly.
+
+
+`compress` emits spec-compliant `Compressed_Block`s natively:
+
+- LZ77 match finding over a hash chain (4-byte hash, configurable depth)
+- Raw/RLE literal sections per the literals header spec (1/2/3-byte sizes)
+- Sequence section with predefined FSE tables for literal-length, offset and
+  match-length codes, plus extra-bit tails — encoded through a C-exact
+  `FSE_buildCTable`/`FSE_encodeSymbol` port
+- Automatic fallback to `Raw_Block` when compression does not help
+
 ## Compression Levels (i32)
 
 Levels are plain `i32`, range `-131072` to `22` (see `constants.c_level_min/max`). Use `zstd.compressWithLevel` for numeric control:

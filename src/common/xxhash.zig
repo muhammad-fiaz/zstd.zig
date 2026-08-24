@@ -176,3 +176,36 @@ pub const XxHash64State = struct {
         return h64;
     }
 };
+
+const testing = @import("std").testing;
+
+test "xxhash64 empty" {
+    try testing.expectEqual(@as(u64, 0xEF46DB3751D8E999), xxhash64("", 0));
+}
+
+test "xxhash64 deterministic" {
+    const a = xxhash64("hello", 0);
+    const b = xxhash64("hello", 0);
+    try testing.expectEqual(a, b);
+}
+
+test "xxhash64 different inputs" {
+    const a = xxhash64("hello", 0);
+    const b = xxhash64("world", 0);
+    try testing.expect(a != b);
+}
+
+test "XxHash64State" {
+    var st = XxHash64State.init(0);
+    st.update("hello");
+    try testing.expectEqual(xxhash64("hello", 0), st.digest());
+}
+
+test "XxHash64State multi update" {
+    var st1 = XxHash64State.init(0);
+    st1.update("hel");
+    st1.update("lo");
+    var st2 = XxHash64State.init(0);
+    st2.update("hello");
+    try testing.expectEqual(st1.digest(), st2.digest());
+}

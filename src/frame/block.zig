@@ -41,3 +41,29 @@ pub fn getCBlockSize(src: []const u8) errors.ZstdError!usize {
     if (prop.block_type == .rle) return 1;
     return prop.orig_size;
 }
+
+const testing = @import("std").testing;
+
+test "block header roundtrip raw" {
+    var buf: [3]u8 = undefined;
+    writeBlockHeader(&buf, true, .raw, 123);
+    const p = try getBlockHeader(&buf);
+    try testing.expect(p.last_block);
+    try testing.expectEqual(types.BlockType.raw, p.block_type);
+    try testing.expectEqual(@as(u32, 123), p.orig_size);
+}
+
+test "block header roundtrip rle" {
+    var buf: [3]u8 = undefined;
+    writeBlockHeader(&buf, false, .rle, 1000);
+    const p = try getBlockHeader(&buf);
+    try testing.expectEqual(types.BlockType.rle, p.block_type);
+    try testing.expect(!p.last_block);
+}
+
+test "block header roundtrip compressed" {
+    var buf: [3]u8 = undefined;
+    writeBlockHeader(&buf, true, .compressed, 50);
+    const p = try getBlockHeader(&buf);
+    try testing.expectEqual(types.BlockType.compressed, p.block_type);
+}

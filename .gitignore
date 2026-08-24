@@ -21,4 +21,7 @@ example_restored.txt
 .vscode/
 .idea/
 *.swp
-*~
+*~
+# Reference C implementation checkout (local only)
+zstd/
+temp_*.py

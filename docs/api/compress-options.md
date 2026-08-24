@@ -3,6 +3,9 @@ title: CompressionOptions
 description: Options struct for zstd.compressWithOptions().
 ---
 
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig — every algorithm, frame element, and default table in this document follows that version.
+
+
 # CompressionOptions
 
 Options for `zstd.compressWithOptions` and `StreamingCompressor.initWithOptions`. Defined in `src/compress/compress.zig:8` and re-exported as `zstd.CompressionOptions` (`src/zstd.zig:21`).

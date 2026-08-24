@@ -3,6 +3,9 @@ title: Dictionary / DictionaryBuilder
 description: Dictionary compression and decompression types.
 ---
 
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig — every algorithm, frame element, and default table in this document follows that version.
+
+
 # Dictionary / DictionaryBuilder
 
 Dictionary support is implemented in `src/dictionary/dictionary.zig:5` and `src/dictionary/builder.zig:51`, re-exported as `zstd.Dictionary`, `zstd.DictionaryBuilder`, `zstd.DictBuilderParams` (`src/zstd.zig:25-27`).

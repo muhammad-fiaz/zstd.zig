@@ -29,3 +29,95 @@ pub fn legacyVersion(src: []const u8) ?u8 {
 fn readLE32(p: []const u8) u32 {
     return @as(u32, p[0]) | (@as(u32, p[1]) << 8) | (@as(u32, p[2]) << 16) | (@as(u32, p[3]) << 24);
 }
+
+const testing = @import("std").testing;
+
+test "isLegacy v01" {
+    const data = [_]u8{ 0x21, 0xB5, 0x2F, 0xFD, 0, 0, 0, 0 };
+    try testing.expect(isLegacy(&data));
+}
+
+test "isLegacy v02" {
+    const data = [_]u8{ 0x22, 0xB5, 0x2F, 0xFD, 0, 0, 0, 0 };
+    try testing.expect(isLegacy(&data));
+}
+
+test "isLegacy v03" {
+    const data = [_]u8{ 0x23, 0xB5, 0x2F, 0xFD, 0, 0, 0, 0 };
+    try testing.expect(isLegacy(&data));
+}
+
+test "isLegacy v04" {
+    const data = [_]u8{ 0x24, 0xB5, 0x2F, 0xFD, 0, 0, 0, 0 };
+    try testing.expect(isLegacy(&data));
+}
+
+test "isLegacy v05" {
+    const data = [_]u8{ 0x25, 0xB5, 0x2F, 0xFD, 0, 0, 0, 0 };
+    try testing.expect(isLegacy(&data));
+}
+
+test "isLegacy v06" {
+    const data = [_]u8{ 0x26, 0xB5, 0x2F, 0xFD, 0, 0, 0, 0 };
+    try testing.expect(isLegacy(&data));
+}
+
+test "isLegacy v07" {
+    const data = [_]u8{ 0x27, 0xB5, 0x2F, 0xFD, 0, 0, 0, 0 };
+    try testing.expect(isLegacy(&data));
+}
+
+test "isLegacy false for modern" {
+    const data = [_]u8{ 0x28, 0xB5, 0x2F, 0xFD };
+    try testing.expect(!isLegacy(&data));
+}
+
+test "isLegacy false for short" {
+    const data = [_]u8{ 0x21, 0xB5 };
+    try testing.expect(!isLegacy(&data));
+}
+
+test "legacyVersion v01" {
+    const data = [_]u8{ 0x21, 0xB5, 0x2F, 0xFD };
+    try testing.expectEqual(@as(?u8, 1), legacyVersion(&data));
+}
+
+test "legacyVersion v02" {
+    const data = [_]u8{ 0x22, 0xB5, 0x2F, 0xFD };
+    try testing.expectEqual(@as(?u8, 2), legacyVersion(&data));
+}
+
+test "legacyVersion v03" {
+    const data = [_]u8{ 0x23, 0xB5, 0x2F, 0xFD };
+    try testing.expectEqual(@as(?u8, 3), legacyVersion(&data));
+}
+
+test "legacyVersion v04" {
+    const data = [_]u8{ 0x24, 0xB5, 0x2F, 0xFD };
+    try testing.expectEqual(@as(?u8, 4), legacyVersion(&data));
+}
+
+test "legacyVersion v05" {
+    const data = [_]u8{ 0x25, 0xB5, 0x2F, 0xFD };
+    try testing.expectEqual(@as(?u8, 5), legacyVersion(&data));
+}
+
+test "legacyVersion v06" {
+    const data = [_]u8{ 0x26, 0xB5, 0x2F, 0xFD };
+    try testing.expectEqual(@as(?u8, 6), legacyVersion(&data));
+}
+
+test "legacyVersion v07" {
+    const data = [_]u8{ 0x27, 0xB5, 0x2F, 0xFD };
+    try testing.expectEqual(@as(?u8, 7), legacyVersion(&data));
+}
+
+test "legacyVersion null for modern" {
+    const data = [_]u8{ 0x28, 0xB5, 0x2F, 0xFD };
+    try testing.expectEqual(@as(?u8, null), legacyVersion(&data));
+}
+
+test "legacyVersion null for short" {
+    const data = [_]u8{ 0x21, 0xB5 };
+    try testing.expectEqual(@as(?u8, null), legacyVersion(&data));
+}

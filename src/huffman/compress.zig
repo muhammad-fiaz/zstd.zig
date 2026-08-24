@@ -37,7 +37,7 @@ pub fn countFrequencies(counts: []u32, src: []const u8) usize {
 
 // Builds a Huffman tree from sorted nodes (descending by count).
 // Returns index of the last non-null node (smallest count).
-// Matches the reference HUF_buildTree() logic including sentinel handling.
+// Tree construction with sentinel leaf handling.
 pub fn buildTree(nodes: []NodeElt, max_symbol: usize) usize {
     // Find the last non-null symbol
     var non_null_rank: usize = max_symbol;
@@ -52,7 +52,7 @@ pub fn buildTree(nodes: []NodeElt, max_symbol: usize) usize {
 
     const start_node = symbol_value_max + 1;
     var node_nb = start_node;
-    // Use signed indices to handle the sentinel (like C's huffNode0[-1])
+    // Signed indices reach the sentinel node at position -1.
     var low_s: isize = @intCast(non_null_rank);
     const node_root: usize = node_nb + non_null_rank - 1;
     var low_n: isize = @intCast(node_nb);
@@ -69,7 +69,7 @@ pub fn buildTree(nodes: []NodeElt, max_symbol: usize) usize {
         nodes[n_idx].count = @as(u32, 1) << 30;
     }
 
-    // The C code uses huffNode[-1].count = 1<<31 as a strong barrier.
+    // The sentinel node carries weight 1 << 31 as an overflow barrier.
     // When low_s < 0, we treat it as having count (1<<31).
     while (node_nb <= node_root) {
         const n1: usize = blk: {
@@ -123,7 +123,7 @@ pub fn buildTree(nodes: []NodeElt, max_symbol: usize) usize {
 }
 
 // Enforces a maximum bit depth on the Huffman tree, redistributing cost.
-// Matches HUF_setMaxHeight() from the reference implementation.
+// Height limiting so no code exceeds the table log.
 pub fn setMaxHeight(nodes: []NodeElt, last_non_null: usize, target_nb_bits: u8) u8 {
     const largest_bits = nodes[last_non_null].nb_bits;
     if (largest_bits <= target_nb_bits) return largest_bits;
@@ -218,7 +218,7 @@ pub fn buildCTable(ctable: *HuffCTable, counts: []const u32, max_symbol: usize, 
         nodes[s].byte = @truncate(s);
     }
 
-    // Insertion sort descending by count (matches HUF_sort in C reference)
+    // Sort symbols by frequency descending.
     for (1..max_symbol + 1) |i| {
         const key = nodes[i];
         var j: isize = @as(isize, @intCast(i)) - 1;
@@ -412,4 +412,27 @@ pub fn buildWeights(weights: []u8, counts: []const u32, max_symbol: usize) error
         weights[s] = if (bits == 0) 0 else (log + 1 - bits);
     }
     return log;
+}
+
+const testing = std.testing;
+
+test "compressHuffman roundtrip" {
+    var dst: [256]u8 = undefined;
+    const src = [_]u8{ 1, 2, 2, 3, 3, 3, 4, 4, 4, 4 };
+    const c_len = try compressHuffman(&dst, &src);
+    try testing.expect(c_len > 0);
+
+    var decompressed: [10]u8 = undefined;
+    const huff_decompress_mod = @import("decompress.zig");
+    const d_len = try huff_decompress_mod.decompressHuffmanBlock(testing.allocator, &decompressed, dst[0..c_len]);
+    try testing.expectEqual(@as(usize, 10), d_len);
+    try testing.expectEqualSlices(u8, &src, &decompressed);
+}
+
+test "buildWeights basic" {
+    var weights: [256]u8 = undefined;
+    const counts = [_]u32{ 10, 5, 3 };
+    const log = try buildWeights(&weights, &counts, 2);
+    try testing.expect(log > 0);
+    try testing.expect(weights[0] > 0);
 }

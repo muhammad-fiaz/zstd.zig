@@ -56,3 +56,31 @@ pub const CompressionContext = struct {
         self.stream.reset();
     }
 };
+
+const testing = std.testing;
+
+test "CompressionContext init deinit" {
+    var ctx = CompressionContext.init(testing.allocator);
+    ctx.deinit();
+}
+
+test "CompressionContext setLevel" {
+    var ctx = CompressionContext.init(testing.allocator);
+    defer ctx.deinit();
+    ctx.setLevel(10);
+    try testing.expectEqual(@as(i32, 10), ctx.options.level);
+}
+
+test "CompressionContext setChecksum" {
+    var ctx = CompressionContext.init(testing.allocator);
+    defer ctx.deinit();
+    ctx.setChecksum(true);
+    try testing.expect(ctx.options.checksum);
+}
+
+test "CompressionContext setWindowLog" {
+    var ctx = CompressionContext.init(testing.allocator);
+    defer ctx.deinit();
+    ctx.setWindowLog(20);
+    try testing.expectEqual(@as(u8, 20), ctx.options.window_log);
+}

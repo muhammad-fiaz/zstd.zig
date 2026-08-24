@@ -33,3 +33,21 @@ pub fn getParams(level: i32, src_size: usize, dict_size: usize) CompressionParam
     }
     return p;
 }
+
+const testing = std.testing;
+
+test "getParams level 1" {
+    const p = getParams(1, 1000, 0);
+    try testing.expectEqual(.fast, p.strategy);
+}
+
+test "getParams level 22" {
+    const p = getParams(22, 1000, 0);
+    try testing.expectEqual(.btultra2, p.strategy);
+}
+
+test "getParams small src adjusts window" {
+    const p = getParams(1, 100, 0);
+    try testing.expect(p.window_log <= 19);
+    try testing.expect(p.window_log >= 10);
+}

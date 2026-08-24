@@ -3,6 +3,9 @@ title: DecompressionOptions
 description: Options struct for decompression contexts.
 ---
 
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig — every algorithm, frame element, and default table in this document follows that version.
+
+
 # DecompressionOptions
 
 Options for decompression safety limits. Defined in `src/decompress/context.zig:41` and re-exported as `zstd.DecompressionOptions` (`src/zstd.zig:22`).

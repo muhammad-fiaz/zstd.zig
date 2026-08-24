@@ -7,6 +7,7 @@ const types = @import("../common/types.zig");
 const block_mod = @import("../frame/block.zig");
 const checksum_mod = @import("../frame/checksum.zig");
 const block_decompress = @import("../decompress/block.zig");
+const entropy_mod = @import("../decompress/entropy.zig");
 
 pub const StreamingDecompressor = struct {
     allocator: std.mem.Allocator,
@@ -15,6 +16,7 @@ pub const StreamingDecompressor = struct {
     stage: Stage,
     frame_header: ?types.FrameHeader,
     checksum_state: checksum_mod.ChecksumState,
+    entropy: entropy_mod.State,
     finished: bool,
 
     const Stage = enum { header, blocks, checksum, done };
@@ -27,6 +29,7 @@ pub const StreamingDecompressor = struct {
             .stage = .header,
             .frame_header = null,
             .checksum_state = checksum_mod.ChecksumState.init(),
+            .entropy = entropy_mod.State.init(allocator),
             .finished = false,
         };
     }
@@ -34,6 +37,7 @@ pub const StreamingDecompressor = struct {
     pub fn deinit(self: *StreamingDecompressor) void {
         self.in_buffer.deinit(self.allocator);
         self.out_buffer.deinit(self.allocator);
+        self.entropy.deinit();
     }
 
     pub fn decompressStream(self: *StreamingDecompressor, out: []u8, in_data: []const u8) errors.ZstdError!struct { in_consumed: usize, out_produced: usize, needs_more: bool } {
@@ -54,9 +58,26 @@ pub const StreamingDecompressor = struct {
                     continue;
                 }
                 if (magic != constants.magic_number) return error.PrefixUnknown;
+
+                // Compute the exact frame-header length so partial headers
+                // wait for more input instead of failing mid-parse.
+                const fhd: u8 = slice[4];
+                const ss = (fhd >> 5) & 1;
+                var need: usize = 5;
+                if (ss == 0) need += 1; // window descriptor
+                need += constants.did_field_size[fhd & 3];
+                const fcs_code: u2 = @truncate(fhd >> 6);
+                if (fcs_code == 0 and ss == 1) {
+                    need += 1; // single-segment 1-byte FCS
+                } else {
+                    need += constants.fcs_field_size[fcs_code];
+                }
+                if (slice.len < need) break;
+
                 const fh = try header_mod.getFrameHeader(slice);
                 self.frame_header = fh;
                 in_consumed += fh.header_size;
+                self.entropy.resetFrame(); // frames are independent
                 if (fh.checksum_flag) self.checksum_state = checksum_mod.ChecksumState.init();
                 self.stage = .blocks;
             }
@@ -68,7 +89,7 @@ pub const StreamingDecompressor = struct {
                 if (self.in_buffer.items.len - in_consumed < needed) break;
                 const block_slice = self.in_buffer.items[in_consumed .. in_consumed + needed];
                 const history_slice: []const u8 = self.out_buffer.items;
-                const decoded = try block_decompress.decompressBlock(out[out_produced..], block_slice, history_slice);
+                const decoded = try block_decompress.decompressBlock(&self.entropy, out[out_produced..], block_slice, history_slice);
                 if (self.frame_header != null and self.frame_header.?.checksum_flag) {
                     self.checksum_state.update(out[out_produced .. out_produced + decoded]);
                 }
@@ -113,6 +134,7 @@ pub const StreamingDecompressor = struct {
         self.stage = .header;
         self.frame_header = null;
         self.checksum_state = checksum_mod.ChecksumState.init();
+        self.entropy.resetFrame();
         self.finished = false;
     }
 
@@ -123,6 +145,52 @@ pub const StreamingDecompressor = struct {
 };
 
 pub const DStream = StreamingDecompressor;
+
+const testing = std.testing;
+
+test "StreamingDecompressor init and deinit" {
+    var sd = StreamingDecompressor.init(testing.allocator);
+    defer sd.deinit();
+}
+
+test "StreamingDecompressor decompressAll" {
+    var sd = StreamingDecompressor.init(testing.allocator);
+    defer sd.deinit();
+    const alloc = testing.allocator;
+    const comp_mod = @import("../compress/compress.zig");
+    const c = try comp_mod.compress(alloc, "decompress all test", .{});
+    defer alloc.free(c);
+    var out: [256]u8 = undefined;
+    const n = try sd.decompressAll(&out, c);
+    try testing.expectEqualStrings("decompress all test", out[0..n]);
+}
+
+test "StreamingDecompressor reset" {
+    var sd = StreamingDecompressor.init(testing.allocator);
+    defer sd.deinit();
+    sd.reset();
+}
+
+test "StreamingDecompressor streaming" {
+    var sd = StreamingDecompressor.init(testing.allocator);
+    defer sd.deinit();
+    const alloc = testing.allocator;
+    const src = "streaming decomp test";
+    const comp_mod = @import("../compress/compress.zig");
+    const c = try comp_mod.compress(alloc, src, .{});
+    defer alloc.free(c);
+    var out: [256]u8 = undefined;
+    var total: usize = 0;
+    var pos: usize = 0;
+    while (pos < c.len) {
+        const chunk_size = @min(c.len - pos, 4);
+        const r = try sd.decompressStream(out[total..], c[pos .. pos + chunk_size]);
+        total += r.out_produced;
+        pos += chunk_size;
+        if (r.out_produced == 0 and !r.needs_more) break;
+    }
+    try testing.expectEqualStrings(src, out[0..total]);
+}
 
 fn readLE32(p: []const u8) u32 {
     return @as(u32, p[0]) | (@as(u32, p[1]) << 8) | (@as(u32, p[2]) << 16) | (@as(u32, p[3]) << 24);

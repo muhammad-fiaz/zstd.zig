@@ -54,3 +54,45 @@ fn writeLE32(p: []u8, v: u32) void {
     p[2] = @truncate(v >> 16);
     p[3] = @truncate(v >> 24);
 }
+
+const testing = std.testing;
+
+test "Dictionary load and dictId" {
+    const alloc = testing.allocator;
+    const raw = "test dictionary data";
+    var dict = try loadDictionary(alloc, raw);
+    defer dict.deinit();
+    try testing.expectEqual(@as(u32, 0), dict.dictId());
+}
+
+test "createDictionaryFromData" {
+    const alloc = testing.allocator;
+    var dict = try createDictionaryFromData(alloc, "dict content", 42);
+    defer dict.deinit();
+    try testing.expectEqual(@as(u32, 42), dict.dictId());
+    try testing.expect(dict.data.len > 8);
+}
+
+test "Dictionary content with magic" {
+    const alloc = testing.allocator;
+    var dict = try createDictionaryFromData(alloc, "content test", 99);
+    defer dict.deinit();
+    const content = dict.content();
+    try testing.expectEqual(@as(usize, 12), content.len);
+}
+
+test "Dictionary content without magic" {
+    const alloc = testing.allocator;
+    var dict = try loadDictionary(alloc, "no magic");
+    defer dict.deinit();
+    const content = dict.content();
+    try testing.expectEqual(@as(usize, 8), content.len);
+}
+
+test "Dictionary content too small" {
+    const alloc = testing.allocator;
+    var dict = try loadDictionary(alloc, "ab");
+    defer dict.deinit();
+    const content = dict.content();
+    try testing.expectEqual(@as(usize, 0), content.len);
+}

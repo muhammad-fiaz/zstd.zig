@@ -1,10 +1,317 @@
+//! Compressed-block encoder: LZ77 match finding + literal section +
+//! predefined-FSE sequence bitstream.
+//!
+//! Sequence bitstream: encoder states are initialised from the last
+//! sequence, symbols are emitted back-to-front (offset, match length,
+//! literal length per step) with each symbol's extra bits appended, and the
+//! final states are flushed — the exact inverse of this library's decoder.
+
 const std = @import("std");
 const errors = @import("../common/errors.zig");
 const constants = @import("../common/constants.zig");
 const frame_block = @import("../frame/block.zig");
-const types = @import("../common/types.zig");
+const fse_ctable = @import("../fse/ctable.zig");
+const bitstream_mod = @import("../common/bitstream.zig");
 
-pub const BlockType = types.BlockType;
+pub const BlockType = @import("../common/types.zig").BlockType;
+
+const Seq = struct {
+    lit_len: u32,
+    match_len: u32, // actual length (>=3)
+    /// Offset code + raw extra bits as emitted to the bitstream. For explicit
+    /// distances the decoded distance is (1 << off_code) + ... resolved via
+    /// the OF base table; for repeat codes (off_code <= 1) the decoder derives
+    /// the distance from its repeat-offset history.
+    off_code: u8,
+    off_extra: u32,
+};
+
+/// Offset code for a raw distance (predefined-table safe: code <= 28).
+inline fn offCode(dist: u32) ?u8 {
+    if (dist < 4) return null;
+    const v: u64 = @as(u64, dist) + 3;
+    const code: u8 = @intCast(63 - @clz(v));
+    if (code > constants.default_max_off) return null; // beyond predefined table
+    return code;
+}
+
+/// Literal-length code (LL_base/ll_bits tables).
+fn llCode(len: u32) u8 {
+    var code: u32 = 0;
+    while (code + 1 < constants.ll_base.len and constants.ll_base[code + 1] <= len) code += 1;
+    return @intCast(code);
+}
+
+/// Match-length code (ML_base already includes the minimum of 3).
+fn mlCode(len: u32) u8 {
+    var code: u32 = 0;
+    while (code + 1 < constants.ml_base.len and constants.ml_base[code + 1] <= len) code += 1;
+    return @intCast(code);
+}
+
+const MatchFinder = struct {
+    head: []u32, // hash -> position+1 (0 = empty)
+    prev: []u32, // chain
+    hash_log: u8,
+
+    fn init(allocator: std.mem.Allocator, hash_log: u8) !MatchFinder {
+        const size = @as(usize, 1) << @intCast(hash_log);
+        const head = try allocator.alloc(u32, size);
+        @memset(head, 0);
+        const prev = try allocator.alloc(u32, constants.block_size_max);
+        @memset(prev, 0);
+        return .{ .head = head, .prev = prev, .hash_log = hash_log };
+    }
+
+    fn deinit(self: *MatchFinder, allocator: std.mem.Allocator) void {
+        allocator.free(self.head);
+        allocator.free(self.prev);
+    }
+
+    inline fn hash4(self: *const MatchFinder, src: []const u8, pos: usize) usize {
+        const v = std.mem.readInt(u32, src[pos..][0..4], .little);
+        return (v *% 2654435761) >> @intCast(32 - self.hash_log);
+    }
+};
+
+/// Repeat-offset history, mirroring the decoder exactly so that emitted
+/// codes and history updates stay in lockstep.
+const RepHistory = struct {
+    r: [3]u32 = .{ 1, 4, 8 },
+
+    /// Resolve an explicit distance to (code, extra) and rotate history.
+    fn pushExplicit(self: *RepHistory, dist: u32) struct { code: u8, extra: u32 } {
+        const v: u64 = @as(u64, dist) + 3;
+        const code: u8 = @intCast(63 - @clz(v));
+        const extra: u32 = @intCast(v - (@as(u64, 1) << @intCast(code)));
+        self.r[2] = self.r[1];
+        self.r[1] = self.r[0];
+        self.r[0] = dist;
+        return .{ .code = code, .extra = extra };
+    }
+
+    /// Resolve repeat code 0 (reuse r0 or r1 when lit_len == 0).
+    fn useCode0(self: *RepHistory, lit_len: u32) void {
+        if (lit_len == 0) {
+            // Decoder swaps r0/r1 in this case.
+            const tmp = self.r[0];
+            self.r[0] = self.r[1];
+            self.r[1] = tmp;
+        }
+        // lit_len != 0: history unchanged.
+    }
+
+    /// Resolve repeat code 1 with extra bit `bit`:
+    ///   ll0==0 -> idx = 1+bit   (r1 / r2)
+    ///   ll0==1 -> idx = 2+bit   (r2 / r0-1)
+    fn resolveCode1(self: *RepHistory, lit_len: u32, bit: u32) u32 {
+        const ll0: u32 = @intFromBool(lit_len == 0);
+        const idx = ll0 + bit + 1; // 1..3
+        var d: u32 = switch (idx) {
+            1 => self.r[1],
+            2 => self.r[2],
+            else => blk: {
+                break :blk self.r[0] -% 1; // decrement trick
+            },
+        };
+        if (d == 0) d -%= 1; // invalid stream guard; encoder never emits this
+        if (idx != 1) self.r[2] = self.r[1];
+        self.r[1] = self.r[0];
+        self.r[0] = d;
+        return d;
+    }
+};
+
+fn matchLengthAt(src: []const u8, pos: usize, dist: usize, max_len: usize) usize {
+    if (dist > pos) return 0;
+    var l: usize = 0;
+    while (l < max_len and src[pos + l] == src[pos + l - dist]) : (l += 1) {}
+    return l;
+}
+
+/// Find sequences greedily over `src` using a hash chain plus repeat-offset
+/// candidates. Distances 1-3 are naturally covered by the initial rep
+/// history {1,4,8} and its evolution.
+fn findSequences(
+    allocator: std.mem.Allocator,
+    src: []const u8,
+    min_match_in: usize,
+    search_depth_in: usize,
+) !struct { seqs: []Seq, literals: []u8 } {
+    const min_match = @max(min_match_in, 4); // hash reads 4 bytes
+    const search_depth = @max(search_depth_in, 1);
+
+    var mf = try MatchFinder.init(allocator, 16);
+    defer mf.deinit(allocator);
+
+    const seqs = try allocator.alloc(Seq, 4096);
+    errdefer allocator.free(seqs);
+    const literals = try allocator.alloc(u8, src.len);
+    errdefer allocator.free(literals);
+    var n_lit: usize = 0;
+    var n_seq: usize = 0;
+
+    var reps = RepHistory{};
+    var anchor: usize = 0;
+    var pos: usize = 0;
+
+    while (pos + min_match <= src.len) {
+        const max_len = src.len - pos;
+
+        // --- Repeat-offset candidates (cheapest codes). ---
+        var rep_hit: ?usize = null; // index into reps
+        var rep_len: usize = 0;
+        inline for (0..3) |ri| {
+            const d: usize = reps.r[ri];
+            if (d <= pos) {
+                const l = matchLengthAt(src, pos, d, max_len);
+                if (l > rep_len) {
+                    rep_len = l;
+                    rep_hit = ri;
+                }
+            }
+        }
+        // Prefer rep[0] on ties (cheapest code).
+        if (rep_hit != null and rep_len >= min_match) {
+            const ri = rep_hit.?;
+            const run = pos - anchor;
+            @memcpy(literals[n_lit .. n_lit + run], src[anchor..pos]);
+            n_lit += run;
+            const lit_len: u32 = @intCast(run);
+
+            var code: u8 = undefined;
+            var extra: u32 = 0;
+            if (ri == 0) {
+                // Distance equals most recent offset.
+                if (run != 0) {
+                    code = 0; // reuse r0, history unchanged
+                    reps.useCode0(lit_len);
+                } else {
+                    code = 0; // ll0 path swaps r0/r1
+                    reps.useCode0(lit_len);
+                }
+            } else if (ri == 1) {
+                if (run != 0) {
+                    code = 1;
+                    extra = 0; // idx=1 -> r1
+                    _ = reps.resolveCode1(lit_len, 0);
+                } else {
+                    code = 0; // ll0 swap brings r1 to front
+                    reps.useCode0(lit_len);
+                }
+            } else { // ri == 2
+                if (run != 0) {
+                    code = 1;
+                    extra = 1; // idx=2 -> r2
+                    _ = reps.resolveCode1(lit_len, 1);
+                } else {
+                    code = 1;
+                    extra = @intFromBool(lit_len == 0); // ll0 shifts index by 1 -> still r2
+                    _ = reps.resolveCode1(0, 1);
+                }
+            }
+            seqs[n_seq] = .{
+                .lit_len = lit_len,
+                .match_len = @intCast(rep_len),
+                .off_code = code,
+                .off_extra = extra,
+            };
+            n_seq += 1;
+            if (n_seq == seqs.len) break;
+            var insert = pos;
+            const end_insert = pos + rep_len;
+            while (insert + 4 <= end_insert and insert + 4 <= src.len) : (insert += 1) {
+                const hh = mf.hash4(src, insert);
+                mf.prev[insert] = mf.head[hh];
+                mf.head[hh] = @intCast(insert + 1);
+            }
+            pos += rep_len;
+            anchor = pos;
+            continue;
+        }
+
+        // --- Generic hash-chain search for an explicit distance. ---
+        const h = mf.hash4(src, pos);
+        var best_len: usize = 0;
+        var best_dist: usize = 0;
+        var cand = mf.head[h];
+        var depth: usize = 0;
+        while (cand != 0 and depth < search_depth) : (depth += 1) {
+            const cand_pos = cand - 1;
+            if (pos - cand_pos > constants.block_size_max) break;
+            const l = matchLengthAt(src, pos, pos - cand_pos, max_len);
+            if (l > best_len) {
+                best_len = l;
+                best_dist = pos - cand_pos;
+                if (l == max_len) break;
+            }
+            cand = if (cand_pos < mf.prev.len) mf.prev[cand_pos] else 0;
+        }
+
+        const encodable = best_len >= min_match and best_dist >= 4 and
+            (@as(u64, best_dist) + 3) <= (@as(u64, 1) << @intCast(constants.default_max_off + 1));
+        if (encodable) {
+            if (n_seq == seqs.len) break;
+            const run = pos - anchor;
+            @memcpy(literals[n_lit .. n_lit + run], src[anchor..pos]);
+            n_lit += run;
+            const res = reps.pushExplicit(@intCast(best_dist));
+            seqs[n_seq] = .{
+                .lit_len = @intCast(run),
+                .match_len = @intCast(best_len),
+                .off_code = res.code,
+                .off_extra = res.extra,
+            };
+            n_seq += 1;
+            var insert = pos;
+            const end_insert = pos + best_len;
+            while (insert + 4 <= end_insert and insert + 4 <= src.len) : (insert += 1) {
+                const hh = mf.hash4(src, insert);
+                mf.prev[insert] = mf.head[hh];
+                mf.head[hh] = @intCast(insert + 1);
+            }
+            pos += best_len;
+            anchor = pos;
+        } else {
+            const hh = mf.hash4(src, pos);
+            mf.prev[pos] = mf.head[hh];
+            mf.head[hh] = @intCast(pos + 1);
+            pos += 1;
+        }
+    }
+
+    // Trailing literals.
+    const tail = src[anchor..];
+    @memcpy(literals[n_lit .. n_lit + tail.len], tail);
+    n_lit += tail.len;
+
+    return .{ .seqs = seqs[0..n_seq], .literals = literals[0..n_lit] };
+}
+
+const ctable_mod = fse_ctable;
+
+/// Write raw-literal section header + bytes. Returns total literal section len.
+fn writeRawLiterals(out: []u8, literals: []const u8) usize {
+    const n = literals.len;
+    if (n < 32) {
+        out[0] = @intCast(n << 3); // type=0, format=0
+        @memcpy(out[1 .. 1 + n], literals);
+        return 1 + n;
+    } else if (n < 4096) {
+        // 12-bit size stored in bits [15:4] of LE16 (readLE16 >> 4 == n).
+        out[0] = 0b00_01_00 | @as(u8, @intCast((n & 0xF) << 4));
+        out[1] = @intCast((n >> 4) & 0xFF);
+        @memcpy(out[2 .. 2 + n], literals);
+        return 2 + n;
+    } else {
+        // 20-bit size stored in bits [23:4] of LE24 (readLE24 >> 4 == n).
+        out[0] = 0b00_11_00 | @as(u8, @intCast((n & 0xF) << 4));
+        out[1] = @intCast((n >> 4) & 0xFF);
+        out[2] = @intCast((n >> 12) & 0xFF);
+        @memcpy(out[3 .. 3 + n], literals);
+        return 3 + n;
+    }
+}
 
 pub fn compressBlock(dst: []u8, src: []const u8, is_last: bool) errors.ZstdError!usize {
     if (src.len == 0) {
@@ -18,8 +325,132 @@ pub fn compressBlock(dst: []u8, src: []const u8, is_last: bool) errors.ZstdError
         dst[3] = src[0];
         return 4;
     }
-    const bound = src.len + 3;
-    if (dst.len < bound) return error.DstSizeTooSmall;
+
+    var arena_inst = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena_inst.deinit();
+    const alloc = arena_inst.allocator();
+
+    const found = findSequences(alloc, src, 4, 8) catch return rawFallback(dst, src, is_last);
+
+    if (found.seqs.len == 0 or found.seqs.len > 0xFFFF + constants.long_nb_seq) {
+        return rawFallback(dst, src, is_last);
+    }
+
+    // Layout estimate: literals section + nbSeq + mode byte + bitstream slack.
+    const lit_header: usize = if (found.literals.len < 32) 1 else if (found.literals.len < 4096) 2 else 3;
+    const nb_seq_size: usize = if (found.seqs.len < 128) 1 else if (found.seqs.len < 0x7F00) 2 else 3;
+    const upper_bound = lit_header + found.literals.len + nb_seq_size + 1 + (src.len / 2 + 64);
+    if (dst.len < upper_bound) {
+        return rawFallback(dst, src, is_last);
+    }
+
+    var body: std.ArrayList(u8) = .empty;
+    // arena-backed; no explicit deinit needed
+    body.ensureTotalCapacity(alloc, upper_bound) catch return rawFallback(dst, src, is_last);
+
+    // Literals.
+    body.resize(alloc, lit_header + found.literals.len) catch return rawFallback(dst, src, is_last);
+    _ = writeRawLiterals(body.items[0..], found.literals);
+
+    // nbSeq.
+    const n = found.seqs.len;
+    if (n < 128) {
+        body.append(alloc, @intCast(n)) catch return rawFallback(dst, src, is_last);
+    } else if (n < constants.long_nb_seq) {
+        const b: u16 = @intCast(n);
+        body.append(alloc, @intCast(0x80 | (b >> 8))) catch return rawFallback(dst, src, is_last);
+        body.append(alloc, @truncate(b)) catch return rawFallback(dst, src, is_last);
+    } else {
+        body.append(alloc, 0xFF) catch return rawFallback(dst, src, is_last);
+        const b: u16 = @intCast(n - constants.long_nb_seq);
+        body.append(alloc, @truncate(b)) catch return rawFallback(dst, src, is_last);
+        body.append(alloc, @truncate(b >> 8)) catch return rawFallback(dst, src, is_last);
+    }
+
+    // Symbol modes: all predefined.
+    body.append(alloc, 0x00) catch return rawFallback(dst, src, is_last);
+
+    // Bitstream.
+    const bs_start = body.items.len;
+    body.resize(alloc, bs_start + src.len + 512) catch return rawFallback(dst, src, is_last);
+    const bs_len = encodeSequencesPredefinedInto(alloc, body.items[bs_start..], found.seqs) catch
+        return rawFallback(dst, src, is_last);
+
+    alloc.free(found.seqs);
+    alloc.free(found.literals);
+
+    body.shrinkRetainingCapacity(bs_start + bs_len);
+    const c_len = body.items.len;
+    if (c_len >= src.len or dst.len < 3 + c_len) return rawFallback(dst, src, is_last);
+    frame_block.writeBlockHeader(dst[0..3], is_last, .compressed, @intCast(c_len));
+    @memcpy(dst[3 .. 3 + c_len], body.items);
+    return 3 + c_len;
+}
+
+fn encodeSequencesPredefinedInto(alloc: std.mem.Allocator, out: []u8, seqs: []const Seq) errors.ZstdError!usize {
+    var arena_inst = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena_inst.deinit();
+    const arena = arena_inst.allocator();
+
+    const ll_ct = try fse_ctable.buildCTable(arena, &constants.ll_default_norm, constants.max_ll, @intCast(constants.ll_default_norm_log));
+    const ml_ct = try fse_ctable.buildCTable(arena, &constants.ml_default_norm, constants.max_ml, @intCast(constants.ml_default_norm_log));
+    // Predefined OF table covers codes 0..default_max_off only.
+    const of_ct = try fse_ctable.buildCTable(arena, &constants.of_default_norm, constants.of_default_norm.len - 1, @intCast(constants.of_default_norm_log));
+
+    const ll_codes = alloc.alloc(u8, seqs.len) catch return error.OutOfMemory;
+    const ml_codes = alloc.alloc(u8, seqs.len) catch return error.OutOfMemory;
+    for (seqs, 0..) |sq, i| {
+        ll_codes[i] = llCode(sq.lit_len);
+        ml_codes[i] = mlCode(sq.match_len);
+    }
+
+    var bc = bitstream_mod.BIT_CStream.init(out) catch return error.DstSizeTooSmall;
+
+    var st_ml: fse_ctable.CState = .{};
+    st_ml.initState(&ml_ct, ml_codes[seqs.len - 1]);
+    var st_of: fse_ctable.CState = .{};
+    st_of.initState(&of_ct, seqs[seqs.len - 1].off_code);
+    var st_ll: fse_ctable.CState = .{};
+    st_ll.initState(&ll_ct, ll_codes[seqs.len - 1]);
+
+    const li = seqs.len - 1;
+    writeExtraBits(seqs[li], ll_codes[li], ml_codes[li], &bc);
+    bc.flushBits();
+
+    var i: usize = seqs.len - 1;
+    while (i > 0) {
+        i -= 1;
+        st_of.encodeSymbol(&of_ct, &bc, seqs[i].off_code);
+        st_ml.encodeSymbol(&ml_ct, &bc, ml_codes[i]);
+        st_ll.encodeSymbol(&ll_ct, &bc, ll_codes[i]);
+        writeExtraBits(seqs[i], ll_codes[i], ml_codes[i], &bc);
+        bc.flushBits();
+    }
+
+    st_ml.flushState(&bc);
+    st_of.flushState(&bc);
+    st_ll.flushState(&bc);
+
+    return bc.close() catch return error.DstSizeTooSmall;
+}
+
+fn writeExtraBits(sq: Seq, llc: u8, mlc: u8, bc: *bitstream_mod.BIT_CStream) void {
+    bc.addBits(sq.lit_len - constants.ll_base[llc], constants.ll_bits[llc]);
+    bc.addBits(sq.match_len - constants.ml_base[mlc], constants.ml_bits[mlc]);
+    // Offset extra bits. For code >= 2 the decoder computes
+    // distance = OF_base[code] + extra; codes 0/1 are repeat codes whose
+    // single bit (code 1) or zero bits (code 0) the decoder interprets
+    // against its repeat history.
+    if (sq.off_code >= 2) {
+        // off_extra already stores value - (1 << code).
+        bc.addBits(sq.off_extra, sq.off_code);
+    } else if (sq.off_code == 1) {
+        bc.addBits(sq.off_extra, 1);
+    }
+}
+
+fn rawFallback(dst: []u8, src: []const u8, is_last: bool) errors.ZstdError!usize {
+    if (dst.len < src.len + 3) return error.DstSizeTooSmall;
     frame_block.writeBlockHeader(dst[0..3], is_last, .raw, @intCast(src.len));
     @memcpy(dst[3 .. 3 + src.len], src);
     return 3 + src.len;
@@ -36,130 +467,4 @@ pub fn compressBlockWithStrategy(dst: []u8, src: []const u8, is_last: bool, stra
     _ = strategy;
     _ = level;
     return compressBlock(dst, src, is_last);
-}
-
-fn tryCompress(dst: []u8, src: []const u8) ?usize {
-    return tryCompressLevel(dst, src, 256, 4);
-}
-
-fn tryCompressLevel(dst: []u8, src: []const u8, window: usize, min_match: usize) ?usize {
-    // Toy LZ77 + raw literals + toy sequences (compatible with decompress/sequences.zig)
-    // Limits: lit_len up to 255, offset 1..256, match_len 3..258, nb_seq <128 for simplicity
-    const Sequence = struct { lit_len: usize, offset: usize, match_len: usize };
-    var seqs: [1024]Sequence = undefined;
-    var seq_count: usize = 0;
-    var literals_buf: [131072]u8 = undefined;
-    var literals_len: usize = 0;
-
-    var pos: usize = 0;
-    var anchor: usize = 0;
-
-    while (pos < src.len and seq_count < 1024) {
-        var best_len: usize = 0;
-        var best_off: usize = 0;
-        if (pos + min_match <= src.len) {
-            const win_start: usize = if (pos > window) pos - window else 0;
-            var ref: usize = win_start;
-            while (ref < pos) : (ref += 1) {
-                if (src[ref] != src[pos]) continue;
-                // quick 4-byte check when possible
-                if (pos + 4 <= src.len and ref + 4 <= src.len) {
-                    if (src[ref + 0] != src[pos + 0] or src[ref + 1] != src[pos + 1] or src[ref + 2] != src[pos + 2] or src[ref + 3] != src[pos + 3]) continue;
-                }
-                const max_len = @min(src.len - pos, 258);
-                const max_ref = src.len - ref;
-                const limit = @min(max_len, max_ref);
-                var len: usize = 0;
-                while (len < limit and src[ref + len] == src[pos + len]) : (len += 1) {}
-                if (len >= min_match and len > best_len) {
-                    best_len = len;
-                    best_off = pos - ref;
-                    if (len == 258) break;
-                }
-            }
-        }
-        if (best_len >= min_match) {
-            const lit_len = pos - anchor;
-            if (lit_len > 255) {
-                return null;
-            }
-            if (best_off == 0 or best_off > window or best_off > 256) return null;
-            // Clamp match len to 258 max, already.
-            if (seq_count >= seqs.len) return null;
-            // Append literals for this sequence
-            if (literals_len + lit_len > literals_buf.len) return null;
-            if (lit_len > 0) {
-                @memcpy(literals_buf[literals_len .. literals_len + lit_len], src[anchor..pos]);
-                literals_len += lit_len;
-            }
-            seqs[seq_count] = .{ .lit_len = lit_len, .offset = best_off, .match_len = best_len };
-            seq_count += 1;
-            pos += best_len;
-            anchor = pos;
-        } else {
-            pos += 1;
-        }
-    }
-    // trailing literals
-    const trailing = src.len - anchor;
-    if (literals_len + trailing > literals_buf.len) return null;
-    if (trailing > 0) {
-        @memcpy(literals_buf[literals_len .. literals_len + trailing], src[anchor .. anchor + trailing]);
-        literals_len += trailing;
-    }
-
-    if (seq_count == 0) return null;
-    if (seq_count >= 128) return null; // need 1-byte nb_seq
-
-    // Estimate sizes
-    const lit_header: usize = if (literals_len < 32) 1 else if (literals_len < 4096) 2 else 3;
-    const lit_section = lit_header + literals_len;
-    // sequences section: nb_seq 1 + sym 1 + 3 RLE +1 dummy + per-seq (3 each)
-    const seq_section: usize = 1 + 1 + 4 + seq_count * 3;
-    const total = lit_section + seq_section;
-    if (total >= src.len) return null;
-    if (dst.len < total) return null;
-
-    // Encode literals section (raw type 0)
-    var out_pos: usize = 0;
-    if (literals_len < 32) {
-        dst[out_pos] = @truncate(literals_len << 3);
-        out_pos += 1;
-    } else if (literals_len < 4096) {
-        dst[out_pos] = @truncate((1 << 2) | ((literals_len >> 8) << 4));
-        dst[out_pos + 1] = @truncate(literals_len);
-        out_pos += 2;
-    } else {
-        dst[out_pos] = @truncate((3 << 2) | ((literals_len >> 16) << 4));
-        dst[out_pos + 1] = @truncate(literals_len >> 8);
-        dst[out_pos + 2] = @truncate(literals_len);
-        out_pos += 3;
-    }
-    if (literals_len > 0) {
-        @memcpy(dst[out_pos .. out_pos + literals_len], literals_buf[0..literals_len]);
-        out_pos += literals_len;
-    }
-
-    // Encode sequences section
-    dst[out_pos] = @truncate(seq_count);
-    out_pos += 1;
-    dst[out_pos] = 0x54; // ll=1, of=1, ml=1
-    out_pos += 1;
-    // RLE values + dummy (ignored by decompressor but required)
-    dst[out_pos] = 0;
-    dst[out_pos + 1] = 0;
-    dst[out_pos + 2] = 0;
-    dst[out_pos + 3] = 0;
-    out_pos += 4;
-
-    for (0..seq_count) |i| {
-        const s = seqs[i];
-        dst[out_pos] = @truncate(s.lit_len);
-        out_pos += 1;
-        dst[out_pos] = @truncate(s.offset - 1);
-        dst[out_pos + 1] = @truncate(s.match_len - 3);
-        out_pos += 2;
-    }
-
-    return out_pos;
 }

@@ -31,3 +31,22 @@ pub fn writeChecksum(buf: []u8, checksum: u32) void {
 pub fn readChecksum(src: []const u8) u32 {
     return @as(u32, src[0]) | (@as(u32, src[1]) << 8) | (@as(u32, src[2]) << 16) | (@as(u32, src[3]) << 24);
 }
+
+const testing = @import("std").testing;
+
+test "checksum deterministic" {
+    const a = computeChecksum("hello world");
+    const b = computeChecksum("hello world");
+    try testing.expectEqual(a, b);
+}
+
+test "checksum different inputs" {
+    const a = computeChecksum("hello");
+    const b = computeChecksum("world");
+    try testing.expect(a != b);
+}
+
+test "checksum read" {
+    const buf = [_]u8{ 0x78, 0x56, 0x34, 0x12 };
+    try testing.expectEqual(@as(u32, 0x12345678), readChecksum(&buf));
+}

@@ -43,9 +43,9 @@ pub fn main() !void {
 ## Output
 
 ```text
-Compressed 330 -> 340 bytes with tracking allocator: 1 allocs, 340 bytes net (live)
+Compressed 330 -> 88 bytes with tracking allocator: 2 allocs, 88 bytes net (live)
 Decompressed 330 bytes, verified
-After free: 2 allocs, 2 frees, 0 bytes net (balanced)
+After free: 3 allocs, 3 frees, 0 bytes net (balanced)
 ```
 
 ## Explanation

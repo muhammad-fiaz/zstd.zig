@@ -42,3 +42,28 @@ pub const DecompressionOptions = struct {
     max_window_size: usize = 1 << 27,
     force_ignore_checksum: bool = false,
 };
+
+const testing = std.testing;
+
+test "DecompressionContext init" {
+    var ctx = DecompressionContext.init(testing.allocator);
+    ctx.deinit();
+}
+
+test "DecompressionContext decompress" {
+    var ctx = DecompressionContext.init(testing.allocator);
+    defer ctx.deinit();
+    const alloc = testing.allocator;
+    const comp_mod = @import("../compress/compress.zig");
+    const c = try comp_mod.compress(alloc, "ctx decompress test", .{});
+    defer alloc.free(c);
+    const d = try ctx.decompressAlloc(c);
+    defer alloc.free(d);
+    try testing.expectEqualStrings("ctx decompress test", d);
+}
+
+test "DecompressionOptions defaults" {
+    const opts = DecompressionOptions{};
+    try testing.expect(opts.max_window_size > 0);
+    try testing.expect(!opts.force_ignore_checksum);
+}

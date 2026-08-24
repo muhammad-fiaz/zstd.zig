@@ -3,6 +3,9 @@ title: CompressionContext
 description: Reusable compression context with parameter control.
 ---
 
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig — every algorithm, frame element, and default table in this document follows that version.
+
+
 # CompressionContext
 
 A reusable compression context. Create once, compress multiple buffers with the same settings. Defined in `src/compress/context.zig:6` and re-exported as `zstd.CompressionContext` (`src/zstd.zig:23`).

@@ -5,6 +5,7 @@ const header_mod = @import("../frame/header.zig");
 const block_mod = @import("../frame/block.zig");
 const checksum_mod = @import("../frame/checksum.zig");
 const block_decompress = @import("block.zig");
+const entropy_mod = @import("entropy.zig");
 const legacy_mod = @import("../legacy/decoder.zig");
 
 pub fn decompressBound(src: []const u8) errors.ZstdError!usize {
@@ -92,8 +93,10 @@ pub fn decompress(allocator: std.mem.Allocator, src: []const u8) anyerror![]u8 {
 pub fn decompressInto(dst: []u8, src: []const u8) errors.ZstdError!usize {
     var src_pos: usize = 0;
     var dst_pos: usize = 0;
-    var history: std.ArrayList(u8) = .empty;
-    defer history.deinit(std.heap.page_allocator);
+    var gpa_state = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa_state.deinit();
+    var entropy_state = entropy_mod.State.init(gpa_state.allocator());
+    defer entropy_state.deinit();
     while (src_pos < src.len) {
         if (src.len - src_pos < 4) return error.SrcSizeWrong;
         const magic = readLE32(src[src_pos..]);
@@ -119,6 +122,7 @@ pub fn decompressInto(dst: []u8, src: []const u8) errors.ZstdError!usize {
         }
         var frame_src_pos = src_pos + fh.header_size;
         const frame_start_dst = dst_pos;
+        entropy_state.resetFrame(); // frames are independent
         var checksum_state = checksum_mod.ChecksumState.init();
         var last = false;
         while (!last) {
@@ -133,7 +137,6 @@ pub fn decompressInto(dst: []u8, src: []const u8) errors.ZstdError!usize {
                     if (dst.len < dst_pos + csize) return error.DstSizeTooSmall;
                     @memcpy(dst[dst_pos .. dst_pos + csize], src[frame_src_pos .. frame_src_pos + csize]);
                     checksum_state.update(dst[dst_pos .. dst_pos + csize]);
-                    try history.appendSlice(std.heap.page_allocator, dst[dst_pos .. dst_pos + csize]);
                     dst_pos += csize;
                     frame_src_pos += csize;
                 },
@@ -144,25 +147,25 @@ pub fn decompressInto(dst: []u8, src: []const u8) errors.ZstdError!usize {
                     if (dst.len < dst_pos + csize) return error.DstSizeTooSmall;
                     @memset(dst[dst_pos .. dst_pos + csize], byte);
                     checksum_state.update(dst[dst_pos .. dst_pos + csize]);
-                    try history.appendSlice(std.heap.page_allocator, dst[dst_pos .. dst_pos + csize]);
                     dst_pos += csize;
                 },
                 .compressed => {
                     if (src.len < frame_src_pos + csize) return error.SrcSizeWrong;
-                    const history_slice = history.items;
-                    const decoded = try block_decompress.decompressBlock(dst[dst_pos..], src[frame_src_pos - 3 .. frame_src_pos + csize], history_slice);
+                    // Window: everything decoded so far within this frame.
+                    const window = dst[frame_start_dst..dst_pos];
+                    const decoded = block_decompress.decompressBlock(
+                        &entropy_state,
+                        dst[dst_pos..],
+                        src[frame_src_pos - 3 .. frame_src_pos + csize],
+                        window,
+                    ) catch |e| {
+                        return e;
+                    };
                     checksum_state.update(dst[dst_pos .. dst_pos + decoded]);
-                    try history.appendSlice(std.heap.page_allocator, dst[dst_pos .. dst_pos + decoded]);
                     dst_pos += decoded;
                     frame_src_pos += csize;
                 },
                 .reserved => return error.InvalidBlock,
-            }
-            if (history.items.len > 1 << 27) {
-                const keep = 1 << 27;
-                const excess = history.items.len - keep;
-                std.mem.copyForwards(u8, history.items[0..keep], history.items[excess .. excess + keep]);
-                history.shrinkRetainingCapacity(keep);
             }
         }
         if (fh.checksum_flag) {
@@ -189,4 +192,70 @@ pub fn decompressWithDict(dst: []u8, src: []const u8, dict: []const u8) errors.Z
 
 fn readLE32(p: []const u8) u32 {
     return @as(u32, p[0]) | (@as(u32, p[1]) << 8) | (@as(u32, p[2]) << 16) | (@as(u32, p[3]) << 24);
+}
+
+const testing = std.testing;
+const compress_mod = @import("../compress/compress.zig");
+
+test "decompress roundtrip" {
+    const alloc = testing.allocator;
+    const src = "roundtrip test data";
+    const c = try compress_mod.compress(alloc, src, .{});
+    defer alloc.free(c);
+    const d = try decompress(alloc, c);
+    defer alloc.free(d);
+    try testing.expectEqualStrings(src, d);
+}
+
+test "decompress empty" {
+    const alloc = testing.allocator;
+    const c = try compress_mod.compress(alloc, "", .{});
+    defer alloc.free(c);
+    const d = try decompress(alloc, c);
+    defer alloc.free(d);
+    try testing.expectEqual(@as(usize, 0), d.len);
+}
+
+test "decompress single byte" {
+    const alloc = testing.allocator;
+    const src = [_]u8{0xFF};
+    const c = try compress_mod.compress(alloc, &src, .{});
+    defer alloc.free(c);
+    const d = try decompress(alloc, c);
+    defer alloc.free(d);
+    try testing.expectEqualSlices(u8, &src, d);
+}
+
+test "decompress large data" {
+    const alloc = testing.allocator;
+    var src: [4096]u8 = undefined;
+    for (&src, 0..) |*b, j| b.* = @intCast(j % 256);
+    const c = try compress_mod.compress(alloc, &src, .{});
+    defer alloc.free(c);
+    const d = try decompress(alloc, c);
+    defer alloc.free(d);
+    try testing.expectEqualSlices(u8, &src, d);
+}
+
+test "decompressBound basic" {
+    const alloc = testing.allocator;
+    const c = try compress_mod.compress(alloc, "bound test", .{});
+    defer alloc.free(c);
+    const bound = try decompressBound(c);
+    try testing.expect(bound >= 10);
+}
+
+test "findFrameCompressedSize" {
+    const alloc = testing.allocator;
+    const c = try compress_mod.compress(alloc, "frame size", .{});
+    defer alloc.free(c);
+    const sz = try findFrameCompressedSize(c);
+    try testing.expectEqual(c.len, sz);
+}
+
+test "decompress invalid magic" {
+    const alloc = testing.allocator;
+    const bad = [_]u8{ 0xFF, 0xFF, 0xFF, 0xFF };
+    const result = decompress(alloc, &bad);
+    try testing.expectError(error.PrefixUnknown, result);
 }
