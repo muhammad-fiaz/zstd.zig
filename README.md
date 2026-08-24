@@ -33,7 +33,7 @@
 > [!NOTE]
 > This implementation follows the **Zstandard 1.6.0 specification**: all algorithms, formats, and logic are implemented natively in Zig to that specification, with transparent backwards-compatibility for legacy frame versions (**v01 through v07**).
 >
-> **Versioning:** \zstd.version\ tracks this library's release (0.0.3); \zstd.spec_version\ tracks the Zstandard format specification it implements (1.6.0).
+> **Versioning:** `zstd.version` tracks this library's release (0.0.3); `zstd.spec_version` tracks the Zstandard format specification it implements (1.6.0).
 >
 > **Pure Zig — zero C dependencies:** Unlike binding-based approaches, `zstd.zig` implements the Zstandard format directly in Zig, including:
 > - **Frame format** with magic number validation, content size detection, and checksum verification
