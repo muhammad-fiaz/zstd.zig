@@ -1,45 +1,43 @@
+//! Recognition and refusal for unsupported legacy Zstandard v0.7 frames.
+
 const std = @import("std");
 const errors = @import("../common/errors.zig");
 const decoder = @import("decoder.zig");
-const modern = @import("../decompress/decompress.zig");
+const refused = @import("refused.zig");
 
-const magic: u32 = 0xFD2FB527;
-const modern_magic: u32 = 0xFD2FB528;
+const testing = std.testing;
 
-fn readLE32(p: []const u8) u32 {
-    return @as(u32, p[0]) | (@as(u32, p[1]) << 8) | (@as(u32, p[2]) << 16) | (@as(u32, p[3]) << 24);
+pub const magic: u32 = 0xFD2FB527;
+pub const version: u8 = 7;
+
+/// The size of a v0.7 frame, or `error.VersionUnsupported`.
+pub fn findFrameSize(allocator: std.mem.Allocator, src: []const u8) errors.ZstdError!usize {
+    return refused.findFrameSize(magic, allocator, src);
 }
 
-fn writeLE32(p: []u8, v: u32) void {
-    p[0] = @truncate(v);
-    p[1] = @truncate(v >> 8);
-    p[2] = @truncate(v >> 16);
-    p[3] = @truncate(v >> 24);
+/// Decodes a v0.7 frame, or returns `error.VersionUnsupported`.
+pub fn decompress(allocator: std.mem.Allocator, dst: []u8, src: []const u8) errors.ZstdError!decoder.Result {
+    return refused.decompress(magic, allocator, dst, src);
 }
 
-pub fn findFrameSize(src: []const u8) errors.ZstdError!usize {
-    if (src.len < 4) return error.SrcSizeWrong;
-    if (readLE32(src[0..4]) != magic) return error.PrefixUnknown;
-    var tmp = std.heap.page_allocator.alloc(u8, src.len) catch return error.MemoryAllocation;
-    defer std.heap.page_allocator.free(tmp);
-    @memcpy(tmp, src);
-    writeLE32(tmp[0..4], modern_magic);
-    const sz = try modern.findFrameCompressedSize(tmp);
-    return @min(sz, src.len);
+test "the version reports its own magic and refuses its own frames" {
+    const alloc = testing.allocator;
+    var frame: [16]u8 = undefined;
+    std.mem.writeInt(u32, frame[0..4], magic, .little);
+    @memset(frame[4..], 0x77);
+
+    var dst: [16]u8 = @splat(0x11);
+    try testing.expectEqual(@as(u8, 7), version);
+    try testing.expectError(error.VersionUnsupported, findFrameSize(alloc, &frame));
+    try testing.expectError(error.VersionUnsupported, decompress(alloc, &dst, &frame));
+    // Nothing was decoded, so nothing was written.
+    for (dst) |byte| try testing.expectEqual(@as(u8, 0x11), byte);
 }
 
-pub fn decompress(dst: []u8, src: []const u8) errors.ZstdError!decoder.Result {
-    if (src.len < 4) return error.SrcSizeWrong;
-    if (readLE32(src[0..4]) != magic) return error.PrefixUnknown;
-    const frame_size = try findFrameSize(src);
-    const actual = @min(frame_size, src.len);
-    var tmp = std.heap.page_allocator.alloc(u8, actual) catch return error.MemoryAllocation;
-    defer std.heap.page_allocator.free(tmp);
-    @memcpy(tmp, src[0..actual]);
-    writeLE32(tmp[0..4], modern_magic);
-    const decoded = modern.decompressInto(dst, tmp) catch |e| {
-        if (e == error.PrefixUnknown) return error.Corruption;
-        return e;
-    };
-    return decoder.Result{ .decoded = decoded, .consumed = actual };
+test "a neighbouring version's magic is not this version's frame" {
+    const alloc = testing.allocator;
+    var frame: [8]u8 = undefined;
+    std.mem.writeInt(u32, frame[0..4], magic +% 1, .little);
+    try testing.expectError(error.PrefixUnknown, findFrameSize(alloc, &frame));
+    try testing.expectError(error.PrefixUnknown, decompress(alloc, &frame, &frame));
 }

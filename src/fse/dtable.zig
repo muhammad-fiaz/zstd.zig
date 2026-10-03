@@ -2,16 +2,17 @@
 //!
 //! Produces decoding tables where each cell stores a symbol plus the number
 //! of bits to consume and the next state, computed as
-//! `new_state = (counter << nb_bits) - table_size`, which is the layout the
+//! `new_state = (counter << nbBits) - table_size`, which is the layout the
 //! Zstandard format defines for FSE-encoded data.
 
 const std = @import("std");
+const bits = @import("../common/bits.zig");
 const errors = @import("../common/errors.zig");
 
 pub const Entry = struct {
     symbol: u16,
-    nb_bits: u8,
-    new_state: u16,
+    nbBits: u8,
+    newState: u16,
 };
 
 pub const DTable = struct {
@@ -28,25 +29,26 @@ pub const DTable = struct {
     }
 };
 
-fn highbit32(v: u32) u5 {
-    std.debug.assert(v != 0);
-    return @intCast(31 - @clz(v));
-}
+/// Largest table log this builder accepts. The current format's tables are at
+/// most 9; the historic formats used 10.
+pub const max_table_log: u8 = 10;
 
-/// Builds a decoding table from normalized counts for symbols 0..max_symbol
-/// (counts may be -1, marking low-probability symbols placed at the top of
-/// the table).
+/// Builds a decoding table from normalized counts for symbols 0..maxSymbol
+/// (counts may be -1, marking low-probability symbols placed at the top of the
+/// table). Table logs up to 10 are accepted because the historic formats use
+/// larger logs; the current format's own limit is enforced when its header is
+/// parsed.
 pub fn build(
     allocator: std.mem.Allocator,
     norm: []const i16,
     max_symbol: usize,
-    table_log: u8,
+    tableLog: u8,
 ) errors.ZstdError!DTable {
-    if (table_log > 9) return error.TableLogTooLarge; // FDBG1
+    if (tableLog > max_table_log) return error.TableLogTooLarge;
     // The compact header cannot express table logs below 5.
-    if (table_log < 5) return error.TableLogTooLarge; // FDBG2
-    const table_size: usize = @as(usize, 1) << @intCast(table_log);
-    const max_sv1 = max_symbol + 1;
+    if (tableLog < 5) return error.TableLogTooLarge; // FDBG2
+    const table_size: usize = @as(usize, 1) << @intCast(tableLog);
+    const maxSv1 = max_symbol + 1;
 
     const entries = try allocator.alloc(Entry, table_size);
     errdefer allocator.free(entries);
@@ -55,7 +57,7 @@ pub fn build(
 
     // Validate counts up-front so low-probability placement cannot underflow.
     var low_prob_count: usize = 0;
-    for (0..max_sv1) |s| {
+    for (0..maxSv1) |s| {
         const c = if (s < norm.len) norm[s] else 0;
         if (c == -1) {
             low_prob_count += 1;
@@ -68,8 +70,8 @@ pub fn build(
     var high_threshold: usize = table_size - 1;
 
     // Init, lay down low-probability symbols (-1 counts) at the top of the table.
-    for (entries) |*e| e.* = .{ .symbol = 0, .nb_bits = 0, .new_state = 0 };
-    for (0..max_sv1) |s| {
+    for (entries) |*e| e.* = .{ .symbol = 0, .nbBits = 0, .newState = 0 };
+    for (0..maxSv1) |s| {
         const c = if (s < norm.len) norm[s] else 0;
         if (c == -1) {
             entries[high_threshold].symbol = @intCast(s);
@@ -84,7 +86,7 @@ pub fn build(
     const mask: usize = table_size - 1;
     const step: usize = (table_size >> 1) + (table_size >> 3) + 3;
     var pos: usize = 0;
-    for (0..max_sv1) |s| {
+    for (0..maxSv1) |s| {
         const c = if (s < norm.len) norm[s] else 0;
         if (c <= 0) continue;
         var i: i32 = 0;
@@ -96,30 +98,44 @@ pub fn build(
     }
     if (pos != 0) return error.Corruption; // FDBG5 // normalized counter incorrect
 
-    // Build the decoding table: nb_bits and new_state follow the format
-    // definition new_state = (next << nb_bits) - table_size.
+    // Build the decoding table: nbBits and new_state follow the format
+    // definition new_state = (next << nbBits) - table_size.
     for (0..table_size) |u| {
         const symbol = entries[u].symbol;
         const next_state = symbol_next_buf[symbol];
         symbol_next_buf[symbol] += 1;
-        const nb_bits: u8 = @intCast(@as(u32, table_log) - highbit32(next_state));
-        entries[u].nb_bits = nb_bits;
-        entries[u].new_state = @truncate((@as(u32, next_state) << @intCast(nb_bits)) -% @as(u32, @intCast(table_size)));
+        const nbBits: u8 = @intCast(@as(u32, tableLog) - @as(u32, bits.highbit32(next_state)));
+        entries[u].nbBits = nbBits;
+        entries[u].newState = @truncate((@as(u32, next_state) << @intCast(nbBits)) -% @as(u32, @intCast(table_size)));
     }
 
-    return .{ .log = table_log, .entries = entries, .allocator = allocator };
+    return .{ .log = tableLog, .entries = entries, .allocator = allocator };
 }
 
 /// Single-symbol RLE table (tableLog = 0): every decode consumes 0 bits.
 pub fn buildRle(allocator: std.mem.Allocator, symbol: u16) errors.ZstdError!DTable {
     const entries = try allocator.alloc(Entry, 1);
-    entries[0] = .{ .symbol = symbol, .nb_bits = 0, .new_state = 0 };
+    entries[0] = .{ .symbol = symbol, .nbBits = 0, .newState = 0 };
     return .{ .log = 0, .entries = entries, .allocator = allocator };
 }
 
-// ---------------------------------------------------------------------------
+/// "Raw" table: every cell holds its own index as the symbol, consumes a fixed
+/// `tableLog` bits and resets the state to zero, so each symbol costs exactly
+/// `tableLog` bits. Unlike uniform counts, every cell has the same width. Only
+/// the historic formats describe sequences this way.
+pub fn buildRaw(allocator: std.mem.Allocator, tableLog: u8) errors.ZstdError!DTable {
+    if (tableLog == 0) return error.TableLogTooLarge;
+    if (tableLog > max_table_log) return error.TableLogTooLarge;
+    const table_size: usize = @as(usize, 1) << @intCast(tableLog);
+    const entries = try allocator.alloc(Entry, table_size);
+    errdefer allocator.free(entries);
+    for (entries, 0..) |*e, i| {
+        e.* = .{ .symbol = @intCast(i), .nbBits = tableLog, .newState = 0 };
+    }
+    return .{ .log = tableLog, .entries = entries, .allocator = allocator };
+}
+
 // Tests
-// ---------------------------------------------------------------------------
 
 const testing = std.testing;
 
@@ -136,12 +152,12 @@ test "dtable simple distribution" {
     var t = try build(testing.allocator, &norm, 2, 5);
     defer t.deinit();
     try testing.expectEqual(@as(usize, 32), t.entries.len);
-    var covered = [_]bool{false} ** 32;
+    var covered: [32]bool = @splat(false);
     for (t.entries) |e| {
-        const span = @as(usize, 1) << @intCast(e.nb_bits);
+        const span = @as(usize, 1) << @intCast(e.nbBits);
         var k: usize = 0;
         while (k < span) : (k += 1) {
-            const idx = e.new_state + k;
+            const idx = e.newState + k;
             try testing.expect(idx < 32); // ranges must not exceed table
             covered[idx] = true;
         }

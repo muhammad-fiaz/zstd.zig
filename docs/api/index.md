@@ -5,7 +5,7 @@ description: Complete API reference for zstd.zig compression library.
 
 # API Reference
 
-## Top-Level Functions (`src/zstd.zig`)
+## Top-Level Functions
 
 ### `compress`
 
@@ -39,21 +39,96 @@ Compress with `CompressionOptions`:
 pub fn compressWithOptions(allocator: std.mem.Allocator, src: []const u8, options: CompressionOptions) anyerror![]u8
 ```
 
+### `compressMT`
+
+Compress one frame across a pool of workers. The frame is split into jobs, the
+header is written once, and the result is an ordinary frame any decoder reads.
+Threads start only for this call, on the `std.Io` passed in:
+
+```zig
+pub fn compressMT(allocator: std.mem.Allocator, io: std.Io, src: []const u8, options: CompressionOptions, threads: usize) anyerror![]u8
+```
+
+Keep the pool across many frames with `MTCompressor` instead:
+
+```zig
+pub const MTCompressor = struct {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, options: CompressionOptions, threads: usize) !MTCompressor;
+    pub fn deinit(self: *MTCompressor) void;                    // joins the workers
+    pub fn compressAlloc(self: *MTCompressor, src: []const u8) anyerror![]u8;
+    pub fn compressInto(self: *MTCompressor, dst: []u8, src: []const u8) ZstdError!usize;
+    minJobSize: usize = 512 * 1024;                             // job floor, lowerable for tests
+};
+```
+
+A frame that fits in one job takes the serial path, so the result is exactly the
+frame `compress` would have written. One compress call runs at a time per
+compressor.
+
+### `Pool`
+
+The worker pool both of those are built on, exported as `zstd.pool`. Jobs are
+plain `fn (?*anyopaque) void` plus one argument, so it fits work this library
+does not know about:
+
+```zig
+pub const pool = @import("common/pool.zig");
+
+var p = try zstd.pool.Pool.init(allocator, io, 4, 0);   // 4 workers, no queue
+defer p.deinit();
+p.add(work, arg);          // blocks until a worker takes it
+if (p.tryAdd(work, arg)) {} // false instead of waiting; queue_size 0 means
+                            // "a free worker or an empty queue"
+p.joinJobs();              // wait for every queued job to finish
+try p.resize(2);           // fewer (or more) workers
+```
+
+The allocator is the caller's; anything the jobs allocate is their business, so
+a job that shares state across threads still needs whatever synchronisation that
+state requires. The pool synchronises the queue, not the jobs.
+
+### `Context`
+
+One reusable context, one allocator, many operations (recommended for
+repeated work):
+
+```zig
+var ctx = zstd.Context.init(allocator);
+defer ctx.deinit();
+const c = try ctx.compress(data);
+defer allocator.free(c);
+const d = try ctx.decompress(c);
+defer allocator.free(d);
+```
+
+```zig
+pub const Context = struct {
+    pub fn init(allocator: std.mem.Allocator) Context;
+    pub fn initWithLevel(allocator: std.mem.Allocator, level: i32) Context;
+    pub fn deinit(self: *Context) void;
+    pub fn setLevel(self: *Context, level: i32) void;
+    pub fn setChecksum(self: *Context, flag: bool) void;
+    pub fn reset(self: *Context) void;
+    pub fn compress(self: *Context, src: []const u8) anyerror![]u8;
+    pub fn decompress(self: *Context, src: []const u8) anyerror![]u8;
+};
+```
+
 ### `compressInto` / `decompressInto`
 
 Preallocated-buffer variants:
 
 ```zig
-pub fn compressInto(dst: []u8, src: []const u8, level: i32) ZstdError!usize
-pub fn decompressInto(dst: []u8, src: []const u8) ZstdError!usize
+pub fn compressInto(allocator: std.mem.Allocator, dst: []u8, src: []const u8, level: i32) ZstdError!usize
+pub fn decompressInto(allocator: std.mem.Allocator, dst: []u8, src: []const u8) ZstdError!usize
 ```
 
 ### `compressBound` / `decompressBound` / `findFrameCompressedSize`
 
 ```zig
-pub fn compressBound(src_size: usize) usize
-pub fn decompressBound(src: []const u8) ZstdError!usize
-pub fn findFrameCompressedSize(src: []const u8) ZstdError!usize
+pub fn compressBound(srcSize: usize) ZstdError!usize
+pub fn decompressBound(allocator: std.mem.Allocator, src: []const u8) ZstdError!usize
+pub fn findFrameCompressedSize(allocator: std.mem.Allocator, src: []const u8) ZstdError!usize
 ```
 
 ### `getFrameContentSize` / `getFrameHeader` / `isFrame` / `isSkippableFrame`
@@ -71,8 +146,8 @@ pub fn readSkippableFrame(dst: []u8, src: []const u8) ZstdError!usize
 
 ```zig
 pub fn loadDictionary(allocator: std.mem.Allocator, data: []const u8) ZstdError!Dictionary
-pub fn createDictionaryFromData(allocator: std.mem.Allocator, data: []const u8, dict_id: u32) ZstdError!Dictionary
-pub fn getCompressionParameters(level: i32, src_size: usize, window_log: u8) CompressionOptions
+pub fn createDictionaryFromData(allocator: std.mem.Allocator, data: []const u8, dictId: u32) ZstdError!Dictionary
+pub fn getCompressionParameters(level: i32, srcSize: usize, windowLog: u8) CompressionOptions
 ```
 
 ### Version
@@ -84,34 +159,33 @@ pub fn minCLevel() i32
 pub fn maxCLevel() i32
 pub fn defaultCLevel() i32
 pub const version: []const u8 = "1.6.0";
-pub const version_number: u32 = 10600;
+pub fn specVersionNumber() u32 // 10600
 ```
 
 ## Types
 
-| Type | Source | Description |
-|------|--------|-------------|
-| [CompressionOptions](/api/compress-options) | `src/compress/compress.zig:8` | `level: i32, window_log/hash_log/chain_log/search_log/min_match/target_length/strategy/checksum/dict_id/content_size/enable_ldm` |
-| [DecompressionOptions](/api/decompress-options) | `src/decompress/context.zig:41` | `max_window_size: usize, force_ignore_checksum: bool` |
-| [CompressionContext](/api/compressor) | `src/compress/context.zig:6` | `init(allocator)`, `initWithLevel(allocator,i32)`, `compressAlloc`, `compress(dst,src)`, `setLevel`, `setChecksum`, `setWindowLog`, `setPledgedSrcSize`, `reset`, `deinit` |
-| [DecompressionContext](/api/decompressor) | `src/decompress/context.zig:6` | `init(allocator)`, `decompressAlloc`, `decompress(dst,src)`, `setMaxWindowSize`, `reset`, `deinit` |
-| [StreamingCompressor (CStream)](/api/stream-compressor) | `src/streaming/compress.zig:11` | `init(allocator,i32)!`, `initWithOptions(allocator,CompressionOptions)`, `compressStream(out,in,EndDirective)->{in_consumed,out_produced,remaining}`, `setPledgedSrcSize`, `setChecksumFlag`, `reset`, `deinit`; `EndDirective {cont,flush,end}` |
-| [StreamingDecompressor (DStream)](/api/stream-decompressor) | `src/streaming/decompress.zig:11` | `init(allocator)`, `decompressStream(out,in)->{in_consumed,out_produced,needs_more}`, `decompressAll`, `reset`, `deinit` |
-| [Dictionary / DictionaryBuilder](/api/dict) | `src/dictionary/dictionary.zig:5`, `src/dictionary/builder.zig:51` | `Dictionary {data, dictId(), content(), deinit}`, `DictionaryBuilder{init(allocator,DictBuilderParams), train, trainCover(k,d), trainFastCover(k,d,f,accel)}` |
-| [FrameHeader](/api/frame) | `src/common/types.zig:3` | `frame_type, header_size, window_size, block_size_max, dict_id, checksum_flag, content_size` |
-| [Strategy](/api/clevel) | `src/common/constants.zig:98` | `fast, dfast, greedy, lazy, lazy2, btlazy2, btopt, btultra, btultra2` |
-| [Constants](/api/constants) | `src/common/constants.zig` | `MAGICNUMBER`, `MAGIC_DICTIONARY`, `BLOCKSIZE_MAX`, `MAX_INPUT_SIZE`, `CONTENTSIZE_UNKNOWN/ERROR`, etc. |
-| [Errors](/api/errors) | `src/common/errors.zig` | `ZstdError` set |
+| Type | Description |
+|------|-------------|
+| [CompressionOptions](/api/compress-options) | `level: i32, windowLog/hashLog/chainLog/searchLog/minMatch/targetLength/strategy/checksum/dictId/contentSize` |
+| [DecompressionOptions](/api/decompress-options) | `maxWindowSize: usize, forceIgnoreChecksum: bool` |
+| [Context](/api/index#context) | Unified reusable `compress`/`decompress` context (recommended) |
+| [CompressionContext](/api/compressor) | `init(allocator)`, `initWithLevel(allocator,i32)`, `compressAlloc`, `compress(dst,src)`, `setLevel`, `setChecksum`, `setWindowLog`, `setLongDistanceMatching`, `setPledgedSrcSize`, `setStrategy`, `setOptions`, `setDictionary`, `reset`, `deinit` |
+| [DecompressionContext](/api/decompressor) | `init(allocator)`, `decompressAlloc`, `decompress(dst,src)`, `setMaxWindowSize`, `setDictionary`, `reset`, `deinit` |
+| [StreamingCompressor](/api/stream-compressor) | `init(allocator,i32)!`, `initWithOptions(allocator,CompressionOptions)`, `compressStream(out,in,EndDirective)->{inConsumed,outProduced,remaining}`, `setPledgedSrcSize`, `setChecksumFlag`, `setDictionary`, `reset`, `deinit`; `EndDirective {cont,flush,end}` |
+| [StreamingDecompressor](/api/stream-decompressor) | `init(allocator)`, `decompressStream(out,in)->{inConsumed,outProduced,needsMore}`, `setMaxWindowSize`, `reset`, `deinit` |
+| [MTCompressor / compressMT](/api/index#compressmt) | `compressMT(allocator,io,src,options,threads)`, `MTCompressor.init(allocator,io,options,threads)`, `compressAlloc`, `compressInto`, `deinit` |
+| [Pool](/api/index#pool) | `Pool.init(allocator,io,threads,queue_depth)`, `add`, `tryAdd`, `joinJobs`, `resize`, `count`, `deinit` |
+| [Dictionary / DictionaryBuilder](/api/dict) | `Dictionary {dictId(), content(), deinit}`; `DictionaryBuilder{init(allocator,DictBuilderParams), train, trainCover(k,d), trainFastCover(k,d,f,accel)}` |
+| [PreparedDictionary](/api/dict) | `prepare`, `fromContent`, `content`, `entropyTables`, `repeats`, `deinit` |
+| [FrameHeader](/api/frame) | `frameType, headerSize, windowSize, blockSizeMax, dictId, checksumFlag, contentSize` |
+| [Frame / FrameIterator](/api/frame) | Walk the frames in a buffer: `FrameIterator.init`, `next`, `offset`; `Frame {kind, offset, totalSize, frameBytes, headerBytes, payloadBytes, header, contentSize, windowSize, headerSize, isSkippable(), bytes()}` |
+| [Strategy](/api/clevel) | `fast, dfast, greedy, lazy, lazy2, btlazy2, btopt, btultra, btultra2` |
+| [Constants](/api/constants) | `MAGICNUMBER`, `MAGIC_DICTIONARY`, `MAGIC_SKIPPABLE_START`, `MAGIC_SKIPPABLE_MASK`, `BLOCKSIZE_MAX`, `MAX_INPUT_SIZE`, `CONTENTSIZE_UNKNOWN`, `CONTENTSIZE_ERROR`, `CLEVEL_DEFAULT` |
+| [Errors](/api/errors) | `ZstdError` set, plus `zstd.errorToString` |
 
 ## Namespaces
 
 ```zig
-zstd.legacy        // legacy frame support: isLegacy(), legacyVersion(), findFrameSize(), decompressLegacy() for v01-v07
-zstd.legacy_detect // legacyVersion()
+zstd.legacy         // isLegacy(), legacyVersion(), findFrameSize(), decompressLegacy() for v01-v07
+zstd.legacyDetect   // legacyVersion(), isLegacy(), supportsDecode()
 ```
-
-## Removed Old Names
-
-The following names appeared in outdated docs and do not exist in `src/zstd.zig`:
-
-`Compressor` → `CompressionContext`, `Decompressor` → `DecompressionContext`, `StreamCompressor`/`StreamDecompressor` → `StreamingCompressor`/`StreamingDecompressor`, `CDict`/`DDict` → `Dictionary`, `Frame.isFrame`/`Frame.contentSize`/`Frame.compressedSize`/`Frame.dictId`/`Frame.inspect` → `isFrame`/`getFrameContentSize`/`findFrameCompressedSize`/`getFrameHeader`, `CLevel` enum → `i32`, `CompressOptions`/`DecompressOptions{dict}` → `CompressionOptions`/`DecompressionOptions{max_window_size,force_ignore_checksum}`, `trainFromSamples(buf,sizes,cap)`/`finalizeDictionary` → `DictionaryBuilder.train*`, `zstd.version.number/string` → `zstd.versionString/Number`, `zstd.constants` → top-level `zstd.MAGICNUMBER` etc.

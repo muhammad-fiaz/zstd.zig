@@ -3,19 +3,20 @@ title: Getting Started
 description: Get up and running with zstd.zig in minutes.
 ---
 
-> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig � every algorithm, frame element, and default table in this document follows that version.
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig - every algorithm, frame element, and default table in this document follows that version.
 
 
 # Getting Started
 
-zstd.zig is a complete native Zig implementation of [Zstandard](https://facebook.github.io/zstd/) compression. No C bindings, no external dependencies — just Zig.
+zstd.zig is a complete native Zig implementation of [Zstandard](https://facebook.github.io/zstd/) compression. No C bindings, no external dependencies - just Zig.
 
 ::: warning Version Requirement
-This library targets **Zig 0.16.0** (stable). Download from [ziglang.org](https://ziglang.org/download/).
+This library targets **Zig 0.17.0**. Download from [ziglang.org](https://ziglang.org/download/).
 
 | Zig Version | Status |
 |-------------|--------|
-| 0.16.0 | Supported — required for this library |
+| 0.17.0 | Supported - required for this library |
+| 0.16.x | Use library v0.0.3 (previous stable) |
 :::
 
 ## Quick Start
@@ -24,7 +25,7 @@ Add zstd.zig to your `build.zig.zon`:
 
 ```zig
 .zstd = .{
-    .url = "https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.3.tar.gz",
+    .url = "https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.4.tar.gz",
     .hash = "...",  // use zig fetch --save to get the hash
 },
 ```
@@ -86,7 +87,7 @@ const custom = try zstd.compressWithLevel(allocator, data, 12);
 ### With Options
 
 ```zig
-const opts = zstd.CompressionOptions{ .level = 9, .checksum = true, .window_log = 20 };
+const opts = zstd.CompressionOptions{ .level = 9, .checksum = true, .windowLog = 20 };
 const compressed = try zstd.compressWithOptions(allocator, data, opts);
 ```
 
@@ -114,8 +115,8 @@ defer allocator.free(d1);
 
 ## What's Next
 
-- [Installation](/guide/installation) — Detailed setup instructions
-- [Compression](/guide/compression) — All compression options
-- [Decompression](/guide/decompression) — Decompression and frame inspection
-- [Streaming](/guide/streaming) — Chunk-based processing
-- [Dictionaries](/guide/dictionaries) — Dictionary compression
+- [Installation](/guide/installation) - Detailed setup instructions
+- [Compression](/guide/compression) - All compression options
+- [Decompression](/guide/decompression) - Decompression and frame inspection
+- [Streaming](/guide/streaming) - Chunk-based processing
+- [Dictionaries](/guide/dictionaries) - Dictionary compression

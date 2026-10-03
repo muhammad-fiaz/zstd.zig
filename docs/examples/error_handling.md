@@ -5,7 +5,7 @@ description: Corruption, truncation and buffer error handling.
 
 # Error Handling
 
-`examples/error_handling.zig` — deterministic `ZstdError` for malformed data.
+`examples/error_handling.zig` - deterministic `ZstdError` for malformed data.
 
 ## Client Code
 
@@ -40,7 +40,7 @@ pub fn main() !void {
         std.debug.print("Truncated correctly failed: {s}\n", .{@errorName(err)});
     }
     var small: [2]u8 = undefined;
-    const r3 = zstd.decompressInto(&small, good);
+    const r3 = zstd.decompressInto(allocator, &small, good);
     if (r3) |sz| {
         std.debug.print("Unexpected success small buf {d}\n", .{sz});
         return error.TestFailed;
@@ -62,7 +62,7 @@ Error handling example complete
 
 ## Explanation
 
-- Never panics on untrusted input — `PrefixUnknown` (bad magic), `SrcSizeWrong` (truncated `FHD`/`Block_Header`), `DstSizeTooSmall`, `ChecksumWrong`, `Corruption`, `InvalidOffset` are all `ZstdError`.
+- Never panics on untrusted input - `PrefixUnknown` (bad magic), `SrcSizeWrong` (truncated `FHD`/`Block_Header`), `DstSizeTooSmall`, `ChecksumWrong`, `Corruption`, `InvalidOffset` are all `ZstdError`.
 - `try zstd.decompress` propagates `error.OutOfMemory` as well.
 
 Run:

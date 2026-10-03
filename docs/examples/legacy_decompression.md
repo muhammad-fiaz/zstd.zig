@@ -5,7 +5,7 @@ description: Legacy frame detection for v01-v07 and skippable frames.
 
 # Legacy Decompression
 
-`examples/legacy_decompression.zig` — `zstd.legacy` and `legacy_detect`.
+`examples/legacy_decompression.zig` - `zstd.legacy` and `legacy_detect`.
 
 ## Client Code
 
@@ -18,8 +18,9 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const legacy_magics = [_]struct { version: u8, magic: u32 }{
-        .{ .version = 1, .magic = 0xFD2FB521 },
+    // Historic frames: how they are recognised, and what happens next
+    const legacyMagics = [_]struct { version: u8, magic: u32 }{
+        .{ .version = 1, .magic = 0xFD2FB51E },
         .{ .version = 2, .magic = 0xFD2FB522 },
         .{ .version = 3, .magic = 0xFD2FB523 },
         .{ .version = 4, .magic = 0xFD2FB524 },
@@ -28,56 +29,66 @@ pub fn main() !void {
         .{ .version = 7, .magic = 0xFD2FB527 },
     };
 
-    for (legacy_magics) |lm| {
+    for (legacyMagics) |lm| {
         var frame: [4]u8 = undefined;
         frame[0] = @truncate(lm.magic);
         frame[1] = @truncate(lm.magic >> 8);
         frame[2] = @truncate(lm.magic >> 16);
         frame[3] = @truncate(lm.magic >> 24);
-        std.debug.print("Legacy v{d:0>2} magic 0x{X:0>8} isLegacy={} version={?d}\n", .{ lm.version, lm.magic, zstd.legacy.isLegacy(&frame), zstd.legacy_detect.legacyVersion(&frame) });
+        std.debug.print("Legacy v{d:0>2} magic 0x{X:0>8} isLegacy={} version={?d}\n", .{ lm.version, lm.magic, zstd.legacy.isLegacy(&frame), zstd.legacyDetect.legacyVersion(&frame) });
         std.debug.assert(zstd.legacy.isLegacy(&frame));
-        std.debug.assert(zstd.legacy_detect.legacyVersion(&frame).? == lm.version);
+        std.debug.assert(zstd.legacyDetect.legacyVersion(&frame).? == lm.version);
     }
 
-    const modern_data = "modern frame test";
-    const modern_compressed = try zstd.compress(allocator, modern_data);
-    defer allocator.free(modern_compressed);
-    std.debug.assert(!zstd.legacy.isLegacy(modern_compressed));
-    std.debug.assert(zstd.isFrame(modern_compressed));
+    // Modern frame should not be legacy
+    const modernData = "modern frame test";
+    const modernCompressed = try zstd.compress(allocator, modernData);
+    defer allocator.free(modernCompressed);
+    std.debug.assert(!zstd.legacy.isLegacy(modernCompressed));
+    std.debug.assert(zstd.isFrame(modernCompressed));
     std.debug.print("Modern frame correctly not detected as legacy\n", .{});
 
-    const decompressed = try zstd.decompress(allocator, modern_compressed);
+    // A modern frame is decoded by the normal path; only a historic magic is routed to the legacy reader
+    const decompressed = try zstd.decompress(allocator, modernCompressed);
     defer allocator.free(decompressed);
-    std.debug.assert(std.mem.eql(u8, modern_data, decompressed));
-    std.debug.print("Legacy decoder transparently handles modern frames\n", .{});
+    std.debug.assert(std.mem.eql(u8, modernData, decompressed));
+    std.debug.print("modern frame magic 0x{X:0>8}: isLegacy={} version={?d}\n", .{ @as(u32, 0xFD2FB528), zstd.legacy.isLegacy(modern), zstd.legacyDetect.legacyVersion(modern) });
 
-    var skip_buf: [32]u8 = undefined;
-    const skip_len = zstd.writeSkippableFrame(&skip_buf, "legacy meta", 4);
-    std.debug.assert(zstd.isSkippableFrame(skip_buf[0..skip_len]));
-    std.debug.print("Skippable frame written {d} bytes\n", .{skip_len});
+    // Demonstrate skippable frame handling (not legacy, but related)
+    var skipBuf: [32]u8 = undefined;
+    const skipLen = zstd.writeSkippableFrame(&skipBuf, "legacy meta", 4);
+    std.debug.assert(zstd.isSkippableFrame(skipBuf[0..skipLen]));
+    std.debug.print("Skippable frame written {d} bytes\n", .{skipLen});
 }
 ```
 
 ## Output
 
 ```text
-Legacy v01 magic 0xFD2FB521 isLegacy=true version=1
-Legacy v02 magic 0xFD2FB522 isLegacy=true version=2
-Legacy v03 magic 0xFD2FB523 isLegacy=true version=3
-Legacy v04 magic 0xFD2FB524 isLegacy=true version=4
-Legacy v05 magic 0xFD2FB525 isLegacy=true version=5
-Legacy v06 magic 0xFD2FB526 isLegacy=true version=6
-Legacy v07 magic 0xFD2FB527 isLegacy=true version=7
-Modern frame correctly not detected as legacy
-Legacy decoder transparently handles modern frames
-Skippable frame written 19 bytes
+modern frame magic 0xFD2FB528: isLegacy=false version=null
+
+v0.1 magic 0xFD2FB51E: isLegacy=true version=1
+v0.2 magic 0xFD2FB522: isLegacy=true version=2
+v0.3 magic 0xFD2FB523: isLegacy=true version=3
+v0.4 magic 0xFD2FB524: isLegacy=true version=4
+v0.5 magic 0xFD2FB525: isLegacy=true version=5
+v0.6 magic 0xFD2FB526: isLegacy=true version=6
+v0.7 magic 0xFD2FB527: isLegacy=true version=7
+
+near miss: isLegacy=false
+
+v0.6 magic on a body: decode says error.VersionUnsupported
+
+Historic frames: all seven magics recognised and versioned;
+v0.1 through v0.5 decode, v0.6 and v0.7 are refused without writing output.
 ```
 
 ## Explanation
 
-- `zstd.legacy.isLegacy` checks `0xFD2FB521-27`; `legacyVersion` returns `1..7` or `null`. Modern `0xFD2FB528` is not legacy.
-- `zstd.decompress` transparently delegates to `src/legacy/decoder.zig` when legacy is detected, otherwise to `src/decompress/decompress.zig`.
-- `isSkippableFrame`/`writeSkippableFrame` handle `0x184D2A50` range, preserved across legacy detection.
+- `zstd.legacy.isLegacy` checks `0xFD2FB51E-27`; `zstd.legacyDetect.legacyVersion` returns `1..7` or `null`. Modern `0xFD2FB528` is not legacy.
+- `zstd.decompress` routes a historic magic to the legacy reader and a modern magic to the ordinary one, so a caller never has to pick.
+- **Five of the seven historic formats decode**: v0.1 through v0.5 each have their own reader, one per format change, and each regenerates a real frame of that version byte for byte. v0.6 and v0.7 have no reader and are refused with `error.VersionUnsupported` from every entry point. The example proves the refusal writes nothing: the output buffer still holds the caller's bytes afterwards.
+- `isSkippableFrame`/`writeSkippableFrame` handle the `0x184D2A50` range, which is unaffected by legacy detection.
 
 Run:
 

@@ -57,16 +57,33 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     var tracking = TrackingAllocator{ .parent = gpa.allocator() };
     const allocator = tracking.allocator();
-    const data = "Custom allocator example: tracking allocations during compression." ** 5;
+
+    // One client allocator flows into one reusable context, which performs
+    // many operations without ever creating its own allocator.
+    var ctx = zstd.Context.init(allocator);
+    defer ctx.deinit();
+
     {
-        const c = try zstd.compress(allocator, data);
+        var data: std.ArrayList(u8) = .empty;
+        defer data.deinit(allocator);
+        for (0..5) |_| try data.appendSlice(allocator, "Custom allocator example: tracking allocations during compression.");
+
+        const c = try ctx.compress(data.items);
         defer allocator.free(c);
-        std.debug.print("Compressed {d} -> {d} bytes with tracking allocator: {d} allocs, {d} bytes net (live)\n", .{ data.len, c.len, tracking.allocs, tracking.allocated });
-        const d = try zstd.decompress(allocator, c);
+        std.debug.print("Compressed {d} -> {d} bytes with tracking allocator: {d} allocs, {d} bytes net (live)\n", .{ data.items.len, c.len, tracking.allocs, tracking.allocated });
+        const d = try ctx.decompress(c);
         defer allocator.free(d);
-        std.debug.assert(std.mem.eql(u8, data, d));
+        std.debug.assert(std.mem.eql(u8, data.items, d));
         std.debug.print("Decompressed {d} bytes, verified\n", .{d.len});
+
+        // A second round through the SAME context and allocator proves reuse.
+        const c2 = try ctx.compress("second payload through the same context");
+        defer allocator.free(c2);
+        const d2 = try ctx.decompress(c2);
+        defer allocator.free(d2);
+        std.debug.assert(std.mem.eql(u8, "second payload through the same context", d2));
     }
+
     std.debug.print("After free: {d} allocs, {d} frees, {d} bytes net (balanced)\n", .{ tracking.allocs, tracking.frees, tracking.allocated });
     std.debug.assert(tracking.allocated == 0);
     std.debug.assert(tracking.allocs == tracking.frees);

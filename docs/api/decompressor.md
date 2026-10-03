@@ -3,12 +3,12 @@ title: DecompressionContext
 description: Reusable decompression context.
 ---
 
-> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig — every algorithm, frame element, and default table in this document follows that version.
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig - every algorithm, frame element, and default table in this document follows that version.
 
 
 # DecompressionContext
 
-A reusable decompression context for decompressing multiple buffers. Defined in `src/decompress/context.zig:6` and re-exported as `zstd.DecompressionContext` (`src/zstd.zig:24`).
+A reusable decompression context for decompressing multiple buffers. Re-exported as `zstd.DecompressionContext`.
 
 ## Definition
 
@@ -16,7 +16,7 @@ A reusable decompression context for decompressing multiple buffers. Defined in 
 pub const DecompressionContext = struct {
     allocator: std.mem.Allocator,
     stream: StreamingDecompressor,
-    max_window_size: usize, // default 1<<27
+    maxWindowSize: usize, // default 1<<27
     // ...
 };
 ```
@@ -108,4 +108,3 @@ const n = try dctx.decompress(&buf, c2);
 dctx.reset();
 ```
 
-> Removed names: old `Decompressor`, `Decompressor.init(allocator, opts)`, `decompress(src)` returning owned slice without `decompressAlloc`, and per-call `DecompressOptions` are replaced by `DecompressionContext` above.

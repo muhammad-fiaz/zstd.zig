@@ -7,7 +7,7 @@ description: Compress data with zstd.zig using CompressionOptions and numeric le
 
 ## One-Shot Compression
 
-The simplest way to compress data — default level `3`:
+The simplest way to compress data - default level `3`:
 
 ```zig
 const zstd = @import("zstd");
@@ -16,7 +16,7 @@ const compressed = try zstd.compress(allocator, data);
 defer allocator.free(compressed);
 ```
 
-`compress` signature from `src/zstd.zig:55`:
+`compress` signature from:
 
 ```zig
 pub fn compress(allocator: std.mem.Allocator, src: []const u8) anyerror![]u8
@@ -33,7 +33,7 @@ literal sections, and FSE-encoded sequence sections all conform exactly.
 - LZ77 match finding over a hash chain (4-byte hash, configurable depth)
 - Raw/RLE literal sections per the literals header spec (1/2/3-byte sizes)
 - Sequence section with predefined FSE tables for literal-length, offset and
-  match-length codes, plus extra-bit tails � encoded through a C-exact
+  match-length codes, plus extra-bit tails - encoded through a C-exact
   `FSE_buildCTable`/`FSE_encodeSymbol` port
 - Automatic fallback to `Raw_Block` when compression does not help
 
@@ -54,7 +54,7 @@ const max = zstd.maxCLevel();     // 22
 const def = zstd.defaultCLevel(); // 3
 ```
 
-`compressWithLevel` signature (`src/zstd.zig:63`):
+`compressWithLevel` signature:
 
 ```zig
 pub fn compressWithLevel(allocator: std.mem.Allocator, src: []const u8, level: i32) anyerror![]u8
@@ -64,22 +64,22 @@ pub fn compressWithLevel(allocator: std.mem.Allocator, src: []const u8, level: i
 
 ## CompressionOptions
 
-For fine-grained control use `zstd.compressWithOptions` (`src/zstd.zig:68`, `src/compress/compress.zig:8`):
+For fine-grained control use `zstd.compressWithOptions`:
 
 ```zig
 pub const CompressionOptions = struct {
     level: i32 = 3,
-    window_log: u8 = 0,
-    hash_log: u8 = 0,
-    chain_log: u8 = 0,
-    search_log: u8 = 0,
-    min_match: u8 = 0,
-    target_length: u32 = 0,
+    windowLog: u8 = 0,
+    hashLog: u8 = 0,
+    chainLog: u8 = 0,
+    searchLog: u8 = 0,
+    minMatch: u8 = 0,
+    targetLength: u32 = 0,
     strategy: Strategy = .fast,
     checksum: bool = false,
-    dict_id: u32 = 0,
-    content_size: ?u64 = null,
-    enable_ldm: bool = false,
+    dictId: u32 = 0,
+    contentSize: ?u64 = null,
+
 };
 ```
 
@@ -87,7 +87,7 @@ pub const CompressionOptions = struct {
 const opts = zstd.CompressionOptions{
     .level = 9,
     .checksum = true,
-    .window_log = 20,
+    .windowLog = 20,
     .strategy = .lazy2,
 };
 const compressed = try zstd.compressWithOptions(allocator, data, opts);
@@ -103,21 +103,21 @@ defer allocator.free(c2);
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `level` | `i32` | `3` | Compression level (`minCLevel`..`maxCLevel`) |
-| `window_log` | `u8` | `0` | Window log override (0 = auto) |
-| `hash_log` | `u8` | `0` | Hash log override |
-| `chain_log` | `u8` | `0` | Chain log override |
-| `search_log` | `u8` | `0` | Search log override |
-| `min_match` | `u8` | `0` | Minimum match length |
-| `target_length` | `u32` | `0` | Target length |
+| `windowLog` | `u8` | `0` | Window log override (0 = auto) |
+| `hashLog` | `u8` | `0` | Hash log override |
+| `chainLog` | `u8` | `0` | Chain log override |
+| `searchLog` | `u8` | `0` | Search log override |
+| `minMatch` | `u8` | `0` | Minimum match length |
+| `targetLength` | `u32` | `0` | Target length |
 | `strategy` | `Strategy` | `.fast` | `fast, dfast, greedy, lazy, lazy2, btlazy2, btopt, btultra, btultra2` |
 | `checksum` | `bool` | `false` | Enable XXH64 checksum |
-| `dict_id` | `u32` | `0` | Dictionary ID for frame header |
-| `content_size` | `?u64` | `null` | Pledged source size (null = auto) |
-| `enable_ldm` | `bool` | `false` | Enable long distance matching |
+| `dictId` | `u32` | `0` | Dictionary ID for frame header |
+| `contentSize` | `?u64` | `null` | Pledged source size (null = auto) |
+
 
 ## Reusable CompressionContext
 
-For compressing multiple buffers with the same settings (`src/compress/context.zig:6`):
+For compressing multiple buffers with the same settings:
 
 ```zig
 var cctx = zstd.CompressionContext.init(allocator);
@@ -139,7 +139,7 @@ var buf: [4096]u8 = undefined;
 const written = try cctx.compress(&buf, data);
 ```
 
-### CompressionContext Methods (`src/compress/context.zig:6`)
+### CompressionContext Methods
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
@@ -162,21 +162,24 @@ cctx.setPledgedSrcSize(@as(?u64, data.len));
 cctx.reset(); // reuse for new job
 ```
 
-> Removed names: old `Compressor`, `CompressOptions`, `compress2`, `setParameter(CParameter)`, `reset(ResetDirective)` no longer exist — use `CompressionContext` above.
 
 ## compressBound / compressInto
 
-Pre-allocate output buffers:
+Pre-allocate output buffers. `compressBound` is a worst-case guarantee, not an
+estimate: a buffer of exactly that size holds the frame for any input of that
+length, at any level. It fails only for a size the format cannot represent
+(at or above `MAX_INPUT_SIZE`), rather than wrapping.
 
 ```zig
-// Maximum compressed size (src/compress/compress.zig:23):  pub fn compressBound(src_size: usize) usize
-const bound = zstd.compressBound(src.len);
+const bound = try zstd.compressBound(src.len);
 var buf = try allocator.alloc(u8, bound);
 defer allocator.free(buf);
 
-// One-shot into fixed buffer with level (src/zstd.zig:72): pub fn compressInto(dst: []u8, src: []const u8, level: i32) ZstdError!usize
-const written = try zstd.compressInto(&buf, src, 3);
+const written = try zstd.compressInto(allocator, buf, src, 3);
 ```
+
+`compressInto` returns `error.DstSizeTooSmall` when `dst` is below the bound, so
+a short buffer is reported rather than yielding a truncated frame.
 
 ## Checksum
 
@@ -185,5 +188,5 @@ Enable frame checksum for data integrity verification:
 ```zig
 const opts = zstd.CompressionOptions{ .checksum = true };
 const compressed = try zstd.compressWithOptions(allocator, data, opts);
-// The decompressor will verify the checksum automatically; use DecompressionOptions.force_ignore_checksum to skip
+// The decompressor will verify the checksum automatically; use DecompressionOptions.forceIgnoreChecksum to skip
 ```

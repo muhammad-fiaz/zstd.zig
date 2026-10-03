@@ -13,6 +13,9 @@ pub const ZstdError = error{
     WorkspaceTooSmall,
     DstSizeTooSmall,
     SrcSizeWrong,
+    /// An input or output size the format cannot represent, typically at or
+    /// above MAX_INPUT_SIZE. Reported by compressBound rather than wrapped.
+    SrcSizeTooLarge,
     DstBufferNull,
     NoForwardProgressDestFull,
     NoForwardProgressInputEmpty,
@@ -31,6 +34,8 @@ pub const ZstdError = error{
     InvalidHuffmanTable,
     InvalidSequence,
     InvalidOffset,
+    /// A match distance wider than the format's offset code can express.
+    OffsetTooLarge,
     ContentSizeMismatch,
     AllocationFailure,
     GenericError,
@@ -53,6 +58,7 @@ pub fn errorToString(err: ZstdError) []const u8 {
         error.WorkspaceTooSmall => "workSpace_tooSmall",
         error.DstSizeTooSmall => "dstSize_tooSmall",
         error.SrcSizeWrong => "srcSize_wrong",
+        error.SrcSizeTooLarge => "srcSize_tooLarge",
         error.DstBufferNull => "dstBuffer_null",
         error.NoForwardProgressDestFull => "noForwardProgress_destFull",
         error.NoForwardProgressInputEmpty => "noForwardProgress_inputEmpty",
@@ -71,6 +77,7 @@ pub fn errorToString(err: ZstdError) []const u8 {
         error.InvalidHuffmanTable => "invalid_huffman_table",
         error.InvalidSequence => "invalid_sequence",
         error.InvalidOffset => "invalid_offset",
+        error.OffsetTooLarge => "offset_too_large",
         error.ContentSizeMismatch => "content_size_mismatch",
         error.AllocationFailure => "allocation_failure",
         error.GenericError => "generic_error",

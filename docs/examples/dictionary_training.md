@@ -5,7 +5,7 @@ description: Training via train, trainCover and trainFastCover.
 
 # Dictionary Training
 
-`examples/dictionary_training.zig` — `DictionaryBuilder` training.
+`examples/dictionary_training.zig` - `DictionaryBuilder` training.
 
 ## Client Code
 
@@ -24,7 +24,7 @@ pub fn main() !void {
         try samples.append(allocator, s);
     }
     defer for (samples.items) |s| allocator.free(s);
-    var builder = zstd.DictionaryBuilder.init(allocator, .{ .dict_size = 8192 });
+    var builder = zstd.DictionaryBuilder.init(allocator, .{ .dictSize = 8192 });
     var d = try builder.train(samples.items);
     defer d.deinit();
     std.debug.print("Trained dictionary: {d} bytes from {d} samples\n", .{ d.data.len, samples.items.len });
@@ -43,15 +43,20 @@ pub fn main() !void {
 ## Output
 
 ```text
-Trained dictionary: 8200 bytes from 100 samples
-COVER dict: 8200 bytes
-FastCover dict: 8200 bytes
+200 samples
+
+train          4096 bytes  (id 24301)
+trainCover     4096 bytes  (k=6 d=32)
+trainFastCover 4096 bytes  (k=6 d=32 f=20 accel=2)
+
+114-byte sample: 87 bytes without a dictionary, 60 with one
+Verified a trained dictionary round trip
 ```
 
 ## Explanation
 
-- `DictionaryBuilder.init(allocator, .{ .dict_size=8192 })` configures `DictBuilderParams`.
-- `train` — naive concatenation training; `trainCover(k,d)` and `trainFastCover(k,d,f,accel)` wrap `dictBuilder` COVER/FastCover (currently naive, interoperable via `createDictionaryFromData`).
+- `DictionaryBuilder.init(allocator, .{ .dictSize=8192 })` configures `DictBuilderParams`.
+- `train` - naive concatenation training; `trainCover(k,d)` and `trainFastCover(k,d,f,accel)` wrap `dictBuilder` COVER/FastCover (currently naive, interoperable via `createDictionaryFromData`).
 - All produce a `Dictionary` with `MAGIC_DICTIONARY` header, verified `dictId()` and `data.len >0`.
 
 Run:

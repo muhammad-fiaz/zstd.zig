@@ -5,9 +5,9 @@ description: Library constants for magic numbers, sizes, and limits.
 
 # Constants
 
-All constants are defined in `src/common/constants.zig` and exposed as top-level aliases in `src/zstd.zig:40-48` (not under `zstd.constants`).
+All constants are exposed as top-level aliases (not under `zstd.constants`).
 
-## Top-Level Aliases (`src/zstd.zig:40`)
+## Top-Level Aliases
 
 ```zig
 pub const MAGICNUMBER: u32 = 0xFD2FB528;
@@ -35,7 +35,7 @@ const max_block = zstd.BLOCKSIZE_MAX; // 131072
 if (zstd.getFrameContentSize(data) == zstd.CONTENTSIZE_UNKNOWN) { /* ... */ }
 ```
 
-## Magic Numbers (`src/common/constants.zig:1-4`)
+## Magic Numbers
 
 | Constant | Value | Description |
 |----------|-------|-------------|
@@ -44,11 +44,11 @@ if (zstd.getFrameContentSize(data) == zstd.CONTENTSIZE_UNKNOWN) { /* ... */ }
 | `magic_skippable_start` | `0x184D2A50` | Skippable frame start magic |
 | `magic_skippable_mask` | `0xFFFFFFF0` | Mask for skippable frame detection |
 
-## Sizes and Limits (`src/common/constants.zig:5-50`)
+## Sizes and Limits
 
 | Constant | Value | Description |
 |----------|-------|-------------|
-| `block_size_max` | `131072` (128 KB) | Maximum block size (`1 << 17`) |
+| `blockSizeMax` | `131072` (128 KB) | Maximum block size (`1 << 17`) |
 | `block_size_log_max` | `17` | Log2 of maximum block size |
 | `contentsize_unknown` | `0xFFFFFFFFFFFFFFFF - 1` | Sentinel for unknown content size |
 | `contentsize_error` | `0xFFFFFFFFFFFFFFFF - 2` | Sentinel for content size error |
@@ -56,7 +56,7 @@ if (zstd.getFrameContentSize(data) == zstd.CONTENTSIZE_UNKNOWN) { /* ... */ }
 | `window_log_min/max` | `10` / `30` (32-bit) or `31` (64-bit) | Window log range |
 | `c_level_min/max/default` | `-131072` / `22` / `3` | Compression level range |
 
-## Version (`src/zstd.zig:1-2`, `134-151`)
+## Version (, `134-151`)
 
 ```zig
 pub const version: []const u8 = "1.6.0";
@@ -75,15 +75,27 @@ std.debug.print("Number: {d}\n", .{zstd.versionNumber()});
 std.debug.print("Default level: {d}\n", .{zstd.defaultCLevel()});
 ```
 
-> Removed: old `zstd.constants.magic_number`, `zstd.version.number/string`, `zstd.version.clevel_min/max/default` no longer exist — use top-level `zstd.MAGICNUMBER`, `zstd.versionString()`, `zstd.versionNumber()`, `zstd.minCLevel()` etc. Also `zstd.CLEVEL_DEFAULT` is available.
-
 ## Version Constants
 
 | Constant | Value | Description |
 |----------|-------|-------------|
-| `zstd.version` | `"0.0.3"` | This library's release version |
-| `zstd.version_number` | `3` | Numeric library version |
-| `zstd.spec_version` | `"1.6.0"` | Zstandard format specification implemented |
-| `zstd.spec_version_number` | `10600` | Numeric specification version |
+| `zstd.version` | `"0.0.4"` | This library's release version, as a comptime string |
+| `zstd.versionString()` | `"0.0.4"` | The same string, as a function |
+| `zstd.versionNumber()` | `4` | `major*100*100 + minor*100 + patch` for `0.0.4` |
+| `zstd.specVersionString()` | `"1.6.0"` | Zstandard format specification implemented |
+| `zstd.specVersionNumber()` | `10600` | `major*100*100 + minor*100 + patch` for `1.6.0` |
 
-Helpers: `zstd.versionString()`, `zstd.versionNumber()`, `zstd.specVersionString()`, `zstd.specVersionNumber()`.
+`zstd.version` and `zstd.versionString()` both report the library; the `spec*`
+pair reports the format it reads and writes. They move independently, so a reader
+that needs the format version must use the `spec*` pair.
+
+## Level Constants
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `zstd.minCLevel()` | `-131072` | Lowest accepted level (fastest) |
+| `zstd.maxCLevel()` | `22` | Highest accepted level |
+| `zstd.defaultCLevel()` | `3` | Level used when none is given |
+| `zstd.CLEVEL_DEFAULT` | `3` | The same default, as a constant |
+
+Levels are plain `i32`, not an enum, matching the specification's own range.

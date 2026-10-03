@@ -3,29 +3,30 @@ title: CompressionOptions
 description: Options struct for zstd.compressWithOptions().
 ---
 
-> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig — every algorithm, frame element, and default table in this document follows that version.
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig - every algorithm, frame element, and default table in this document follows that version.
 
 
 # CompressionOptions
 
-Options for `zstd.compressWithOptions` and `StreamingCompressor.initWithOptions`. Defined in `src/compress/compress.zig:8` and re-exported as `zstd.CompressionOptions` (`src/zstd.zig:21`).
+Options for `zstd.compressWithOptions` and `StreamingCompressor.initWithOptions`, re-exported as `zstd.CompressionOptions`.
 
 ## Definition
 
 ```zig
 pub const CompressionOptions = struct {
     level: i32 = 3,
-    window_log: u8 = 0,
-    hash_log: u8 = 0,
-    chain_log: u8 = 0,
-    search_log: u8 = 0,
-    min_match: u8 = 0,
-    target_length: u32 = 0,
+    windowLog: u8 = 0,
+    hashLog: u8 = 0,
+    chainLog: u8 = 0,
+    searchLog: u8 = 0,
+    minMatch: u8 = 0,
+    targetLength: u32 = 0,
     strategy: Strategy = .fast,
     checksum: bool = false,
-    dict_id: u32 = 0,
-    content_size: ?u64 = null,
-    enable_ldm: bool = false,
+    dictId: u32 = 0,
+    dictionary: ?*const Dictionary = null,
+    contentSize: ?u64 = null,
+
 };
 
 pub const Strategy = enum(u8) {
@@ -38,17 +39,17 @@ pub const Strategy = enum(u8) {
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `level` | `i32` | `3` | Compression level (`-131072`..`22`; `defaultCLevel()=3`). Used by `getCompressionParameters` to derive other params |
-| `window_log` | `u8` | `0` | Window log override (`0` = auto, otherwise `10`..`31`) |
-| `hash_log` | `u8` | `0` | Hash table log size override |
-| `chain_log` | `u8` | `0` | Chain log size override |
-| `search_log` | `u8` | `0` | Search log size override |
-| `min_match` | `u8` | `0` | Minimum match length (3..7) |
-| `target_length` | `u32` | `0` | Target length (0..131072) |
+| `windowLog` | `u8` | `0` | Window log override (`0` = auto, otherwise `10`..`31`) |
+| `hashLog` | `u8` | `0` | Hash table log size override |
+| `chainLog` | `u8` | `0` | Chain log size override |
+| `searchLog` | `u8` | `0` | Search log size override |
+| `minMatch` | `u8` | `0` | Minimum match length (3..7) |
+| `targetLength` | `u32` | `0` | Target length (0..131072) |
 | `strategy` | `Strategy` | `.fast` | Compression strategy |
-| `checksum` | `bool` | `false` | Enable XXH64 frame checksum (`checksum_flag` in header) |
-| `dict_id` | `u32` | `0` | Dictionary ID written to frame header |
-| `content_size` | `?u64` | `null` | Pledged source size (`null` = auto from `src.len`) |
-| `enable_ldm` | `bool` | `false` | Enable long distance matching (reserved) |
+| `checksum` | `bool` | `false` | Enable XXH64 frame checksum (`checksumFlag` in header) |
+| `dictId` | `u32` | `0` | Dictionary ID written to frame header |
+| `contentSize` | `?u64` | `null` | Pledged source size (`null` = auto from `src.len`) |
+
 
 ## Usage
 
@@ -70,17 +71,17 @@ const c3 = try zstd.compressWithOptions(allocator, data, .{
 // All options + strategy
 const c4 = try zstd.compressWithOptions(allocator, data, .{
     .level = 12,
-    .window_log = 22,
-    .hash_log = 18,
-    .chain_log = 18,
-    .search_log = 6,
-    .min_match = 4,
-    .target_length = 32,
+    .windowLog = 22,
+    .hashLog = 18,
+    .chainLog = 18,
+    .searchLog = 6,
+    .minMatch = 4,
+    .targetLength = 32,
     .strategy = .btopt,
     .checksum = true,
-    .dict_id = 42,
-    .content_size = @as(?u64, data.len),
-    .enable_ldm = false,
+    .dictId = 42,
+    .contentSize = @as(?u64, data.len),
+
 });
 
 // Derive tuned options then tweak
@@ -89,4 +90,3 @@ tuned.checksum = true;
 const c5 = try zstd.compressWithOptions(allocator, data, tuned);
 ```
 
-> Removed names: old `CompressOptions { level: CLevel = .default, checksum, dict_id, use_dict_id, strategy: ?Strategy, window_log: ?u32 }` no longer exists. Use the struct above with `i32 level` and `u8` logs.

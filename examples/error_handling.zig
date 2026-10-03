@@ -28,7 +28,7 @@ pub fn main() !void {
         std.debug.print("Truncated correctly failed: {s}\n", .{@errorName(err)});
     }
     var small: [2]u8 = undefined;
-    const r3 = zstd.decompressInto(&small, good);
+    const r3 = zstd.decompressInto(allocator, &small, good);
     if (r3) |sz| {
         std.debug.print("Unexpected success small buf {d}\n", .{sz});
         return error.TestFailed;

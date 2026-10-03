@@ -26,16 +26,16 @@ pub const Decoder = struct {
     /// `src` as the symbol bitstream. Returns bytes consumed by the header.
     pub fn initFromHeader(allocator: std.mem.Allocator, src: []const u8, max_symbol_hint: usize, max_log: u8) errors.ZstdError!struct { dec: Decoder, header_bytes: usize } {
         var norm: [256]i16 = undefined;
-        var max_sv: usize = max_symbol_hint;
+        var maxSv: usize = max_symbol_hint;
         var tl: u8 = 0;
-        const hdr = try readNCount(&norm, &max_sv, &tl, src);
+        const hdr = try readNCount(&norm, &maxSv, &tl, src);
         if (tl > max_log) return error.TableLogTooLarge;
-        const dec = try init(allocator, norm[0 .. max_sv + 1], max_sv, tl, src[hdr..]);
+        const dec = try init(allocator, norm[0 .. maxSv + 1], maxSv, tl, src[hdr..]);
         return .{ .dec = dec, .header_bytes = hdr };
     }
 
-    pub fn init(allocator: std.mem.Allocator, norm: []const i16, max_symbol: usize, table_log: u8, src: []const u8) errors.ZstdError!Decoder {
-        var table = try dtable_mod.build(allocator, norm, max_symbol, table_log);
+    pub fn init(allocator: std.mem.Allocator, norm: []const i16, max_symbol: usize, tableLog: u8, src: []const u8) errors.ZstdError!Decoder {
+        var table = try dtable_mod.build(allocator, norm, max_symbol, tableLog);
         errdefer table.deinit();
         var ds = bitstream_mod.BIT_DStream.init(src) catch return error.Corruption;
         const s1: u16 = @intCast(ds.readBits(table.log));
@@ -49,8 +49,8 @@ pub const Decoder = struct {
 
     fn step(self: *Decoder, state: *u16) u8 {
         const e = self.table.entries[state.*];
-        const low = self.ds.readBits(e.nb_bits);
-        state.* = e.new_state +% @as(u16, @truncate(low));
+        const low = self.ds.readBits(e.nbBits);
+        state.* = e.newState +% @as(u16, @truncate(low));
         return @truncate(e.symbol);
     }
 
@@ -71,9 +71,7 @@ pub const Decoder = struct {
     }
 };
 
-// ---------------------------------------------------------------------------
 // Tests
-// ---------------------------------------------------------------------------
 
 const testing = @import("std").testing;
 
@@ -91,7 +89,7 @@ test "decoder reproduces encoder output" {
     var st1: ctable_mod.CState = .{};
     var st2: ctable_mod.CState = .{};
     // Two-state encoding: initialize from the last two symbols, walk the rest
-    // backwards alternating states, then flush state2 followed by state1 —
+    // backwards alternating states, then flush state2 followed by state1:
     // the exact mirror of this module's decoder.
     st1.initState(&ct, 2);
     st2.initState(&ct, 1);

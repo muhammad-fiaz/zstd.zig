@@ -9,7 +9,7 @@ const constants = @import("../common/constants.zig");
 const header_mod = @import("../frame/header.zig");
 const block_header = @import("../frame/block.zig");
 const checksum_mod = @import("../frame/checksum.zig");
-const entropy_mod = @import("entropy.zig");
+pub const entropy_mod = @import("entropy.zig");
 const block_decompress = @import("block.zig");
 
 pub const FrameResult = struct {
@@ -33,82 +33,79 @@ pub fn decompressFrame(
     if (magic != constants.magic_number) return error.PrefixUnknown;
 
     const fh = try header_mod.getFrameHeader(src);
-    var src_pos: usize = fh.header_size;
-    var dst_pos: usize = 0;
+    var srcPos: usize = fh.headerSize;
+    var dstPos: usize = 0;
     state.resetFrame();
 
-    var checksum_state = checksum_mod.ChecksumState.init();
+    var checksumState = checksum_mod.ChecksumState.init();
     var last = false;
     while (!last) {
-        if (src.len < src_pos + 3) return error.SrcSizeWrong;
-        const props = try block_header.getBlockHeader(src[src_pos..]);
-        last = props.last_block;
-        const csize = props.orig_size;
-        src_pos += 3;
+        if (src.len < srcPos + 3) return error.SrcSizeWrong;
+        const props = try block_header.getBlockHeader(src[srcPos..]);
+        last = props.lastBlock;
+        const cSize = props.origSize;
+        srcPos += 3;
 
-        switch (props.block_type) {
+        switch (props.blockType) {
             .raw => {
-                if (src.len < src_pos + csize) return error.SrcSizeWrong;
-                if (dst.len < dst_pos + csize) return error.DstSizeTooSmall;
-                @memcpy(dst[dst_pos .. dst_pos + csize], src[src_pos .. src_pos + csize]);
-                checksum_state.update(dst[dst_pos .. dst_pos + csize]);
-                dst_pos += csize;
-                src_pos += csize;
+                if (src.len < srcPos + cSize) return error.SrcSizeWrong;
+                if (dst.len < dstPos + cSize) return error.DstSizeTooSmall;
+                std.mem.copyForwards(u8, dst[dstPos .. dstPos + cSize], src[srcPos .. srcPos + cSize]);
+                checksumState.update(dst[dstPos .. dstPos + cSize]);
+                dstPos += cSize;
+                srcPos += cSize;
             },
             .rle => {
-                if (src.len < src_pos + 1) return error.SrcSizeWrong;
-                const value = src[src_pos];
-                src_pos += 1;
-                if (dst.len < dst_pos + csize) return error.DstSizeTooSmall;
-                @memset(dst[dst_pos .. dst_pos + csize], value);
-                checksum_state.update(dst[dst_pos .. dst_pos + csize]);
-                dst_pos += csize;
+                if (src.len < srcPos + 1) return error.SrcSizeWrong;
+                const value = src[srcPos];
+                srcPos += 1;
+                if (dst.len < dstPos + cSize) return error.DstSizeTooSmall;
+                @memset(dst[dstPos .. dstPos + cSize], value);
+                checksumState.update(dst[dstPos .. dstPos + cSize]);
+                dstPos += cSize;
             },
             .compressed => {
-                if (src.len < src_pos + csize) return error.SrcSizeWrong;
+                if (src.len < srcPos + cSize) return error.SrcSizeWrong;
                 // Window: everything decoded so far in this frame.
                 const decoded = try block_decompress.decompressBlock(
                     state,
-                    dst[dst_pos..],
-                    src[src_pos - 3 .. src_pos + csize],
-                    dst[0..dst_pos],
+                    dst[dstPos..],
+                    src[srcPos - 3 .. srcPos + cSize],
+                    dst[0..dstPos],
                 );
-                checksum_state.update(dst[dst_pos .. dst_pos + decoded]);
-                dst_pos += decoded;
-                src_pos += csize;
+                checksumState.update(dst[dstPos .. dstPos + decoded]);
+                dstPos += decoded;
+                srcPos += cSize;
             },
             .reserved => return error.InvalidBlock,
         }
     }
 
-    if (fh.checksum_flag) {
-        if (src.len < src_pos + 4) return error.SrcSizeWrong;
-        const expected = checksum_mod.readChecksum(src[src_pos..]);
-        if (expected != checksum_state.final()) return error.ChecksumWrong;
-        src_pos += 4;
+    if (fh.checksumFlag) {
+        if (src.len < srcPos + 4) return error.SrcSizeWrong;
+        const expected = checksum_mod.readChecksum(src[srcPos..]);
+        if (expected != checksumState.final()) return error.ChecksumWrong;
+        srcPos += 4;
     }
 
-    if (fh.content_size != constants.contentsize_unknown and fh.content_size != constants.contentsize_error) {
-        if (dst_pos != @as(usize, @intCast(fh.content_size))) return error.ContentSizeMismatch;
+    if (fh.contentSize != constants.contentsize_unknown and fh.contentSize != constants.contentsize_error) {
+        if (dstPos != @as(usize, @intCast(fh.contentSize))) return error.ContentSizeMismatch;
     }
 
-    return .{ .written = dst_pos, .consumed = src_pos };
+    return .{ .written = dstPos, .consumed = srcPos };
 }
 
-/// Skip over one skippable frame, returning its total size.
+/// Skip over one skippable frame, returning its total size. The declared payload
+/// length is attacker-controlled, so the total comes from the helper that
+/// checks the addition rather than being recomputed here.
 pub fn skipFrame(src: []const u8) errors.ZstdError!usize {
     if (src.len < 8) return error.SrcSizeWrong;
     const magic = std.mem.readInt(u32, src[0..4], .little);
     if ((magic & constants.magic_skippable_mask) != constants.magic_skippable_start) return error.PrefixUnknown;
-    const size = std.mem.readInt(u32, src[4..8], .little);
-    const total = @as(usize, size) + 8;
-    if (src.len < total) return error.SrcSizeWrong;
-    return total;
+    return header_mod.readSkippableFrameSize(src);
 }
 
-// ---------------------------------------------------------------------------
 // Tests
-// ---------------------------------------------------------------------------
 
 const testing = std.testing;
 
@@ -118,7 +115,10 @@ test "decompressFrame round trip and consumed size" {
     var state = entropy_mod.State.init(alloc);
     defer state.deinit();
 
-    const payload = "frame-level round trip payload " ** 20;
+    const unit = "frame-level round trip payload ";
+    var payload_buf: [unit.len * 20]u8 = undefined;
+    for (0..20) |i| std.mem.copyForwards(u8, payload_buf[i * unit.len ..][0..unit.len], unit);
+    const payload: []const u8 = &payload_buf;
     const comp = try compress_mod.compress(alloc, payload, .{});
     defer alloc.free(comp);
 

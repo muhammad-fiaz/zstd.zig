@@ -3,12 +3,12 @@ title: StreamingCompressor
 description: Chunk-based streaming compression for large data.
 ---
 
-> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig — every algorithm, frame element, and default table in this document follows that version.
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig - every algorithm, frame element, and default table in this document follows that version.
 
 
 # StreamingCompressor
 
-Process data in chunks for streaming compression. Useful when data doesn't fit in memory. Defined in `src/streaming/compress.zig:11` and re-exported as `zstd.StreamingCompressor` / `zstd.CStream` (`src/zstd.zig:28-30`).
+Process data in chunks for streaming compression. Useful when data doesn't fit in memory. Re-exported as `zstd.StreamingCompressor` / `zstd.CStream`.
 
 ## Definition
 
@@ -57,7 +57,7 @@ pub fn initWithOptions(allocator: std.mem.Allocator, options: CompressionOptions
 var comp = zstd.StreamingCompressor.initWithOptions(allocator, .{
     .level = 9,
     .checksum = true,
-    .window_log = 20,
+    .windowLog = 20,
     .strategy = .lazy2,
 });
 defer comp.deinit();
@@ -87,16 +87,16 @@ Feed data into the stream:
 
 ```zig
 pub fn compressStream(self: *StreamingCompressor, out: []u8, in_data: []const u8, directive: EndDirective)
-    ZstdError!struct { in_consumed: usize, out_produced: usize, remaining: usize }
+    ZstdError!struct { inConsumed: usize, outProduced: usize, remaining: usize }
 ```
 
 ```zig
 var out: [1 << 16]u8 = undefined;
 const r1 = try comp.compressStream(out[0..], chunk1, .cont);
-// r1.in_consumed == chunk1.len, r1.out_produced = bytes written to out, r1.remaining = buffered bytes
+// r1.inConsumed == chunk1.len, r1.outProduced = bytes written to out, r1.remaining = buffered bytes
 
-const r2 = try comp.compressStream(out[r1.out_produced..], chunk2, .flush);
-const fin = try comp.compressStream(out[r1.out_produced + r2.out_produced ..], &[_]u8{}, .end);
+const r2 = try comp.compressStream(out[r1.outProduced..], chunk2, .flush);
+const fin = try comp.compressStream(out[r1.outProduced + r2.outProduced ..], &[_]u8{}, .end);
 ```
 
 ### `reset`
@@ -129,8 +129,7 @@ var total: usize = 0;
 for (chunks, 0..) |chunk, i| {
     const dir: zstd.EndDirective = if (i == chunks.len - 1) .end else .flush;
     const res = try cstream.compressStream(out_buf[total..], chunk, dir);
-    total += res.out_produced;
+    total += res.outProduced;
 }
 ```
 
-> Removed names: old `StreamCompressor`, `StreamCompressOptions { level: CLevel }`, `compressChunk`, `endStream`, `flushStream`, `recommendedInSize/OutSize`, `setParameter` no longer exist â€” use `StreamingCompressor` / `CStream` and `compressStream` with `EndDirective {cont,flush,end}`.

@@ -3,12 +3,12 @@ title: CompressionContext
 description: Reusable compression context with parameter control.
 ---
 
-> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig — every algorithm, frame element, and default table in this document follows that version.
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig - every algorithm, frame element, and default table in this document follows that version.
 
 
 # CompressionContext
 
-A reusable compression context. Create once, compress multiple buffers with the same settings. Defined in `src/compress/context.zig:6` and re-exported as `zstd.CompressionContext` (`src/zstd.zig:23`).
+A reusable compression context. Create once, compress multiple buffers with the same settings. Re-exported as `zstd.CompressionContext`.
 
 ## Definition
 
@@ -157,4 +157,3 @@ var buf: [8192]u8 = undefined;
 const n = try cctx.compress(&buf, data3);
 ```
 
-> Removed names: old `Compressor`, `Compressor.init(opts: CompressOptions)`, `compressAlloc(alloc,src)`, `compress2(dst,src)`, `setParameter(.compression_level, .checksum_flag)`, `reset(ResetDirective)` are replaced by the `CompressionContext` API above.

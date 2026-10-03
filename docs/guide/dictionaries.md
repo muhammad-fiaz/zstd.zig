@@ -3,7 +3,7 @@ title: Dictionaries
 description: Use dictionary compression for better ratios on similar data.
 ---
 
-> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig — every algorithm, frame element, and default table in this document follows that version.
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig - every algorithm, frame element, and default table in this document follows that version.
 
 
 # Dictionaries
@@ -12,12 +12,12 @@ Dictionary compression achieves significantly better compression ratios when com
 
 ## Dictionary Type
 
-`Dictionary` is defined in `src/dictionary/dictionary.zig:5`:
+`Dictionary` is defined:
 
 ```zig
 pub const Dictionary = struct {
-    data: []u8, // includes 8-byte header (magic + dict_id)
-    dict_id: u32,
+    data: []u8, // includes 8-byte header (magic + dictId)
+    dictId: u32,
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: *Dictionary) void
@@ -26,11 +26,11 @@ pub const Dictionary = struct {
 };
 ```
 
-Top-level helpers in `src/zstd.zig:52-53`:
+Top-level helpers:
 
 ```zig
 pub fn loadDictionary(allocator: std.mem.Allocator, data: []const u8) ZstdError!Dictionary
-pub fn createDictionaryFromData(allocator: std.mem.Allocator, data: []const u8, dict_id: u32) ZstdError!Dictionary
+pub fn createDictionaryFromData(allocator: std.mem.Allocator, data: []const u8, dictId: u32) ZstdError!Dictionary
 ```
 
 ```zig
@@ -42,7 +42,7 @@ defer dict.deinit();
 std.debug.print("ID={d} size={d}\n", .{ dict.dictId(), dict.data.len });
 std.debug.print("content len={d}\n", .{ dict.content().len });
 
-// Load an existing dictionary blob (preserves its stored dict_id)
+// Load an existing dictionary blob (preserves its stored dictId)
 var loaded = try zstd.loadDictionary(allocator, dict.data);
 defer loaded.deinit();
 std.debug.assert(loaded.dictId() == dict.dictId());
@@ -50,31 +50,30 @@ std.debug.assert(loaded.dictId() == dict.dictId());
 
 ### Compressing with a Dictionary ID
 
-Dictionary-aware compression currently stores the `dict_id` in the frame header via `CompressionOptions`:
+Dictionary-aware compression currently stores the `dictId` in the frame header via `CompressionOptions`:
 
 ```zig
-const opts = zstd.CompressionOptions{ .dict_id = dict.dictId() };
+const opts = zstd.CompressionOptions{ .dictId = dict.dictId() };
 const compressed = try zstd.compressWithOptions(allocator, data, opts);
 defer allocator.free(compressed);
 
 // Verify via header
 const hdr = try zstd.getFrameHeader(compressed);
-std.debug.assert(hdr.dict_id == dict.dictId());
+std.debug.assert(hdr.dictId == dict.dictId());
 
 const decompressed = try zstd.decompress(allocator, compressed);
 defer allocator.free(decompressed);
 ```
 
-> Removed names: old `CDict`/`DDict`, `compressUsingDict`, `decompressUsingDict`, `getDictIDFromDict`, `getDictIDFromFrame`, `compressUsingCDict` no longer exist â€” use `Dictionary`, `loadDictionary`, `createDictionaryFromData`, and `CompressionOptions.dict_id` instead.
 
 ## DictionaryBuilder
 
-`DictionaryBuilder` is defined in `src/dictionary/builder.zig:51`:
+`DictionaryBuilder` is defined:
 
 ```zig
 pub const DictBuilderParams = struct {
-    dict_size: usize = 112640,
-    dict_id: u32 = 0,
+    dictSize: usize = 112640,
+    dictId: u32 = 0,
     level: u32 = 3,
 };
 
@@ -101,7 +100,7 @@ const samples = &[_][]const u8{
     sample1, sample2, sample3, sample4, sample5,
 };
 
-var builder = zstd.DictionaryBuilder.init(allocator, .{ .dict_size = 8192, .dict_id = 42 });
+var builder = zstd.DictionaryBuilder.init(allocator, .{ .dictSize = 8192, .dictId = 42 });
 var dict = try builder.train(samples);
 defer dict.deinit();
 
@@ -126,7 +125,7 @@ for (0..100) |i| {
 }
 defer for (samples.items) |s| allocator.free(s);
 
-var builder = zstd.DictionaryBuilder.init(allocator, .{ .dict_size = 8192 });
+var builder = zstd.DictionaryBuilder.init(allocator, .{ .dictSize = 8192 });
 var d = try builder.train(samples.items);
 defer d.deinit();
 

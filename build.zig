@@ -18,17 +18,29 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(lib);
 
+    // `zig build test` - unit tests for the whole library. The root is
+    // `src/zstd.zig`, which references every module, so a file nothing imports
+    // cannot silently drop its tests out of the run.
     const test_step = b.step("test", "Run all tests");
-    const tests = b.addTest(.{
-        .root_module = zstd_mod,
+    const test_mod = b.createModule(.{
+        .root_source_file = b.path("src/zstd.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = false,
     });
+    const tests = b.addTest(.{ .root_module = test_mod });
     const run_tests = b.addRunArtifact(tests);
     test_step.dependOn(&run_tests.step);
 
+    // `zig build check` - compile tests, examples, and the standalone test
+    // programs without running them. Useful for cross-compilation targets
+    // that cannot execute here.
+    const check_step = b.step("check", "Compile tests and examples without running");
+    check_step.dependOn(&tests.step);
+
+    // `zig build docs` - emit autodocs into zig-out/docs.
     const docs_step = b.step("docs", "Generate documentation");
-    const docs = b.addTest(.{
-        .root_module = zstd_mod,
-    });
+    const docs = b.addTest(.{ .root_module = test_mod });
     const install_docs = b.addInstallDirectory(.{
         .source_dir = docs.getEmittedDocs(),
         .install_dir = .prefix,
@@ -36,9 +48,13 @@ pub fn build(b: *std.Build) void {
     });
     docs_step.dependOn(&install_docs.step);
 
+    // `zig build fmt` - format the tree with the bundled Zig toolchain.
+    const fmt_step = b.step("fmt", "Format all Zig sources");
+    const fmt = b.addFmt(.{ .paths = &.{ b.path("src"), b.path("examples"), b.path("build.zig") } });
+    fmt_step.dependOn(&fmt.step);
+
     const examples = [_]struct { name: []const u8, file: []const u8 }{
         .{ .name = "basic_compression", .file = "examples/basic_compression.zig" },
-        .{ .name = "basic_decompression", .file = "examples/basic_decompression.zig" },
         .{ .name = "custom_level", .file = "examples/custom_level.zig" },
         .{ .name = "advanced_params", .file = "examples/advanced_params.zig" },
         .{ .name = "dictionary_compression", .file = "examples/dictionary_compression.zig" },
@@ -48,10 +64,22 @@ pub fn build(b: *std.Build) void {
         .{ .name = "custom_allocator", .file = "examples/custom_allocator.zig" },
         .{ .name = "error_handling", .file = "examples/error_handling.zig" },
         .{ .name = "legacy_decompression", .file = "examples/legacy_decompression.zig" },
+        .{ .name = "compression_bound", .file = "examples/compression_bound.zig" },
+        .{ .name = "frame_iteration", .file = "examples/frame_iteration.zig" },
+        .{ .name = "prepared_dictionary", .file = "examples/prepared_dictionary.zig" },
+        .{ .name = "window_limit", .file = "examples/window_limit.zig" },
         .{ .name = "file_compression", .file = "examples/file_compression.zig" },
+        .{ .name = "custom_strategy", .file = "examples/custom_strategy.zig" },
+        .{ .name = "long_distance_matching", .file = "examples/long_distance_matching.zig" },
+        .{ .name = "parallel_compression", .file = "examples/parallel_compression.zig" },
     };
 
+    const examples_step = b.step("examples", "Build all examples");
     const run_all = b.step("run-all-examples", "Run all examples");
+
+    // The differential harness against a reference binary lives in the test
+    // root: `zig build test` runs the self round trips always, and the two
+    // reference directions when ZSTD_REFERENCE_PATH names a reference binary.
 
     inline for (examples) |example| {
         const run_step = b.step(
@@ -70,6 +98,9 @@ pub fn build(b: *std.Build) void {
                 },
             }),
         });
+
+        examples_step.dependOn(&exe.step);
+        check_step.dependOn(&exe.step);
 
         const run_exe = b.addRunArtifact(exe);
         run_step.dependOn(&run_exe.step);
