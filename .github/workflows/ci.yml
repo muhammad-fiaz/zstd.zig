@@ -30,7 +30,7 @@ jobs:
             # macos x86_64 is covered via arm64 runner? keep one macos entry
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Zig ${{ matrix.zig }} (${{ matrix.arch }})
         uses: mlugg/setup-zig@v2
         with:
@@ -82,7 +82,7 @@ jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.17.0
@@ -91,7 +91,7 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest

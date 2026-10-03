@@ -2801,3 +2801,59 @@ test "interop: multithreaded frames decode on the reference" {
     test_log.info("interop: the reference decoded {d} multithreaded frames\n", .{checked});
     try testing.expectEqual(3, checked);
 }
+
+test "canonical golden decompression vectors" {
+    const alloc = testing.allocator;
+
+    // 1. empty-block.zst: compressed block with 0 literals and 0 sequences
+    const empty_block = [_]u8{ 0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x00, 0x15, 0x00, 0x00, 0x00, 0x00 };
+    const empty_res = try decompress(alloc, &empty_block);
+    defer alloc.free(empty_res);
+    try testing.expectEqual(@as(usize, 0), empty_res.len);
+
+    // 2. zeroSeq_2B.zst: 2-byte sequence header with zero sequences, payload "Hello World!\n"
+    const zero_seq = [_]u8{
+        0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x00, 0x85, 0x00, 0x00, 0x68, 0x48, 0x65,
+        0x6c, 0x6c, 0x6f, 0x20, 0x57, 0x6f, 0x72, 0x6c, 0x64, 0x21, 0x0a, 0x80,
+        0x00,
+    };
+    const zero_res = try decompress(alloc, &zero_seq);
+    defer alloc.free(zero_res);
+    try testing.expectEqualStrings("Hello World!\n", zero_res);
+
+    // 3. rle-first-block.zst: multiple blocks decoding to 1048576 zero bytes
+    const rle_blocks = [_]u8{
+        40, 181, 47, 253, 164, 0, 0, 16, 0, 2,   0,  16, 0,   2, 0, 16,
+        0,  2,   0,  16,  0,   2, 0, 16, 0, 2,   0,  16, 0,   2, 0, 16,
+        0,  2,   0,  16,  0,   3, 0, 16, 0, 241, 62, 22, 225,
+    };
+    const rle_res = try decompress(alloc, &rle_blocks);
+    defer alloc.free(rle_res);
+    try testing.expectEqual(@as(usize, 1048576), rle_res.len);
+    for (rle_res) |b| try testing.expectEqual(@as(u8, 0), b);
+
+    // Error vector 1: off0.bin.zst: invalid zero offset
+    const off0 = [_]u8{ 0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x00, 0x45, 0x00, 0x00, 0x08, 0x00, 0x02, 0x00, 0x2f, 0x43, 0x0b, 0xae };
+    if (decompress(alloc, &off0)) |bad| {
+        alloc.free(bad);
+        return error.InvalidFrameAccepted;
+    } else |_| {}
+
+    // Error vector 2: truncated_huff_state.zst: truncated Huffman stream
+    const trunc_huff = [_]u8{ 0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x00, 0x55, 0x00, 0x00, 0x72, 0x80, 0x01, 0x04, 0x20, 0x7e, 0x1f, 0x02, 0xaa, 0x00 };
+    if (decompress(alloc, &trunc_huff)) |bad| {
+        alloc.free(bad);
+        return error.InvalidFrameAccepted;
+    } else |_| {}
+
+    // Error vector 3: zeroSeq_extraneous.zst: extraneous bitstream padding
+    const extra_seq = [_]u8{
+        0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x00, 0x95, 0x00, 0x00, 0x68, 0x48, 0x65,
+        0x6c, 0x6c, 0x6f, 0x20, 0x57, 0x6f, 0x72, 0x6c, 0x64, 0x21, 0x0a, 0x80,
+        0x00, 0x00, 0x00,
+    };
+    if (decompress(alloc, &extra_seq)) |bad| {
+        alloc.free(bad);
+        return error.InvalidFrameAccepted;
+    } else |_| {}
+}
