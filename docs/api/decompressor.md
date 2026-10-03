@@ -108,3 +108,37 @@ const n = try dctx.decompress(&buf, c2);
 dctx.reset();
 ```
 
+## `Decoder`
+
+`zstd.Decoder` is a high-level client-side decompression abstraction that accepts `DecompressionOptions` (safety window limit, checksum policies, dictionary binding) and provides clean buffer and allocation decompression:
+
+```zig
+pub const Decoder = struct {
+    pub fn init(allocator: std.mem.Allocator, options: DecompressionOptions) Decoder;
+    pub fn deinit(self: *Decoder) void;
+    pub fn reset(self: *Decoder) void;
+    pub fn setMaxWindowSize(self: *Decoder, size: usize) void;
+    pub fn setDictionary(self: *Decoder, dict: ?*const Dictionary) void;
+    pub fn decompress(self: *Decoder, dst: []u8, src: []const u8) !usize;
+    pub fn decompressAlloc(self: *Decoder, src: []const u8) anyerror![]u8;
+};
+```
+
+### Usage
+
+```zig
+var decoder = zstd.Decoder.init(allocator, .{
+    .maxWindowSize = 1 << 27,
+    .forceIgnoreChecksum = false,
+});
+defer decoder.deinit();
+
+const decompressed = try decoder.decompressAlloc(compressed_bytes);
+defer allocator.free(decompressed);
+```
+
+## `Decompressor`
+
+`zstd.Decompressor` is a direct alias for `zstd.DecompressionContext` matching client naming conventions.
+
+

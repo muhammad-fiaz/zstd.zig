@@ -25,19 +25,10 @@ pub fn countLeadingZeros32(val: u32) u32 {
 /// byte order explicitly so big-endian targets do not silently invert it.
 pub fn nbCommonBytes(val: usize) u32 {
     if (val == 0) return @sizeOf(usize);
-    if (builtin.cpu.arch.endian() == .little) {
-        if (@sizeOf(usize) == 8) {
-            return @as(u32, @ctz(@as(u64, val))) >> 3;
-        } else {
-            return @as(u32, @ctz(@as(u32, @truncate(val)))) >> 3;
-        }
-    } else {
-        if (@sizeOf(usize) == 8) {
-            return @as(u32, @clz(@as(u64, val))) >> 3;
-        } else {
-            return @as(u32, @clz(@as(u32, @truncate(val)))) >> 3;
-        }
-    }
+    return if (builtin.cpu.arch.endian() == .little)
+        @as(u32, @ctz(val)) >> 3
+    else
+        @as(u32, @clz(val)) >> 3;
 }
 
 pub fn rotateRightU32(val: u32, count: u32) u32 {

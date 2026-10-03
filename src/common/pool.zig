@@ -1,8 +1,8 @@
 //! Worker pool: a fixed set of threads pulling jobs from a bounded queue.
 //!
-//! Modeled on upstream `lib/common/pool.c` but built on Zig 0.17 `std`
-//! primitives (`std.Io.Mutex`, `std.Io.Condition`, `std.Thread`). The pool owns
-//! its threads and its queue; the caller owns the job payloads, which must
+//! A native Zig worker pool built on Zig 0.17 `std` primitives
+//! (`std.Io.Mutex`, `std.Io.Condition`, `std.Thread`). The pool owns its
+//! threads and its queue; the caller owns the job payloads, which must
 //! outlive the job's execution.
 //!
 //! Ownership and synchronization rules:

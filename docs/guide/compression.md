@@ -33,8 +33,8 @@ literal sections, and FSE-encoded sequence sections all conform exactly.
 - LZ77 match finding over a hash chain (4-byte hash, configurable depth)
 - Raw/RLE literal sections per the literals header spec (1/2/3-byte sizes)
 - Sequence section with predefined FSE tables for literal-length, offset and
-  match-length codes, plus extra-bit tails - encoded through a C-exact
-  `FSE_buildCTable`/`FSE_encodeSymbol` port
+  match-length codes, plus extra-bit tails - encoded through native Zig
+  FSE table construction and symbol encoding
 - Automatic fallback to `Raw_Block` when compression does not help
 
 ## Compression Levels (i32)

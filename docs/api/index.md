@@ -168,7 +168,10 @@ pub fn specVersionNumber() u32 // 10600
 |------|-------------|
 | [CompressionOptions](/api/compress-options) | `level: i32, windowLog/hashLog/chainLog/searchLog/minMatch/targetLength/strategy/checksum/dictId/contentSize` |
 | [DecompressionOptions](/api/decompress-options) | `maxWindowSize: usize, forceIgnoreChecksum: bool` |
+| [Encoder](/api/compressor#encoder) | High-level client compression encoder with explicit multithreading and options |
+| [Decoder](/api/decompressor#decoder) | High-level client decompression decoder with window limit and dictionary control |
 | [Context](/api/index#context) | Unified reusable `compress`/`decompress` context (recommended) |
+| [Compressor / Decompressor](/api/compressor) | Convenient aliases for CompressionContext and DecompressionContext |
 | [CompressionContext](/api/compressor) | `init(allocator)`, `initWithLevel(allocator,i32)`, `compressAlloc`, `compress(dst,src)`, `setLevel`, `setChecksum`, `setWindowLog`, `setLongDistanceMatching`, `setPledgedSrcSize`, `setStrategy`, `setOptions`, `setDictionary`, `reset`, `deinit` |
 | [DecompressionContext](/api/decompressor) | `init(allocator)`, `decompressAlloc`, `decompress(dst,src)`, `setMaxWindowSize`, `setDictionary`, `reset`, `deinit` |
 | [StreamingCompressor](/api/stream-compressor) | `init(allocator,i32)!`, `initWithOptions(allocator,CompressionOptions)`, `compressStream(out,in,EndDirective)->{inConsumed,outProduced,remaining}`, `setPledgedSrcSize`, `setChecksumFlag`, `setDictionary`, `reset`, `deinit`; `EndDirective {cont,flush,end}` |

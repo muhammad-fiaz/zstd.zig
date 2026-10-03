@@ -157,3 +157,40 @@ var buf: [8192]u8 = undefined;
 const n = try cctx.compress(&buf, data3);
 ```
 
+## `Encoder`
+
+`zstd.Encoder` is a high-level client-side compression abstraction that wraps `CompressionContext` and supports explicit concurrency and parameter control:
+
+```zig
+pub const Encoder = struct {
+    pub fn init(allocator: std.mem.Allocator, options: CompressionOptions) !Encoder;
+    pub fn deinit(self: *Encoder) void;
+    pub fn reset(self: *Encoder) void;
+    pub fn compress(self: *Encoder, src: []const u8) ![]u8;
+    pub fn compressInto(self: *Encoder, dst: []u8, src: []const u8) !usize;
+    pub fn setLevel(self: *Encoder, level: i32) void;
+    pub fn setChecksum(self: *Encoder, flag: bool) void;
+    pub fn setWorkers(self: *Encoder, count: usize) !void;
+};
+```
+
+### Usage
+
+```zig
+var encoder = try zstd.Encoder.init(allocator, .{ .level = 5, .checksum = true });
+defer encoder.deinit();
+
+const compressed = try encoder.compress("Hello World");
+defer allocator.free(compressed);
+
+// Enable multithreaded compression explicitly
+try encoder.setWorkers(4);
+const mt_compressed = try encoder.compress(large_data);
+defer allocator.free(mt_compressed);
+```
+
+## `Compressor`
+
+`zstd.Compressor` is a direct alias for `zstd.CompressionContext` matching client naming conventions.
+
+
