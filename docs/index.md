@@ -6,7 +6,7 @@ titleTemplate: Native Zig Compression Library
 hero:
   name: zstd.zig
   text: Native Zig Compression Library
-  tagline: "A complete native Zig implementation of Zstandard compression. No C bindings, no dependencies. Supports compression, decompression, streaming, and dictionary-based operations for Zig 0.16.0+."
+  tagline: "A complete native Zig implementation of Zstandard compression. No C bindings, no dependencies. Supports compression, decompression, streaming, and dictionary-based operations for Zig 0.17.0+."
   actions:
     - theme: brand
       text: Get Started
@@ -38,3 +38,13 @@ features:
 ---
 
 > zstd.zig follows the Zstandard 1.6.0 specification natively in Zig.
+
+## Acknowledgements
+
+`zstd.zig` is a native Zig implementation of the Zstandard format and codec, built entirely from scratch in Zig.
+
+| | |
+|---|---|
+| **Reference** | [Zstandard project](https://github.com/Facebook/zstd) - format, behavior, compatibility, interoperability |
+| **Implementation** | Native Zig, written from scratch |
+| **Runtime dependency** | No upstream Zstandard implementation required |

@@ -3,19 +3,19 @@ title: DecompressionOptions
 description: Options struct for decompression contexts.
 ---
 
-> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig — every algorithm, frame element, and default table in this document follows that version.
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig - every algorithm, frame element, and default table in this document follows that version.
 
 
 # DecompressionOptions
 
-Options for decompression safety limits. Defined in `src/decompress/context.zig:41` and re-exported as `zstd.DecompressionOptions` (`src/zstd.zig:22`).
+Options for decompression safety limits, re-exported as `zstd.DecompressionOptions`.
 
 ## Definition
 
 ```zig
 pub const DecompressionOptions = struct {
-    max_window_size: usize = 1 << 27,
-    force_ignore_checksum: bool = false,
+    maxWindowSize: usize = 1 << 27,
+    forceIgnoreChecksum: bool = false,
 };
 ```
 
@@ -23,12 +23,12 @@ pub const DecompressionOptions = struct {
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `max_window_size` | `usize` | `1 << 27` (128 MiB) | Maximum allowed window size for decompression safety |
-| `force_ignore_checksum` | `bool` | `false` | If true, skip XXH64 checksum verification |
+| `maxWindowSize` | `usize` | `1 << 27` (128 MiB) | Maximum allowed window size for decompression safety |
+| `forceIgnoreChecksum` | `bool` | `false` | If true, skip XXH64 checksum verification |
 
 ## Usage
 
-Top-level `zstd.decompress(allocator, src)` does not take options â€” configure via `DecompressionContext`:
+Top-level `zstd.decompress(allocator, src)` does not take options - configure via `DecompressionContext`:
 
 ```zig
 const zstd = @import("zstd");
@@ -38,27 +38,26 @@ defer dctx.deinit();
 
 // Apply limits from options struct
 const opts = zstd.DecompressionOptions{
-    .max_window_size = 1 << 27,
-    .force_ignore_checksum = false,
+    .maxWindowSize = 1 << 27,
+    .forceIgnoreChecksum = false,
 };
-dctx.setMaxWindowSize(opts.max_window_size);
-// (force_ignore_checksum is stored for future use; currently validated in frame checksum path)
+dctx.setMaxWindowSize(opts.maxWindowSize);
+// (forceIgnoreChecksum is stored for future use; currently validated in frame checksum path)
 
 const data = try dctx.decompressAlloc(compressed);
 defer allocator.free(data);
 ```
 
-Legacy per-call options pattern no longer exists:
+Safety limits belong to the context, not to a one-shot call:
 
 ```zig
-// Old (removed):
-// try zstd.decompress(allocator, compressed, .{ .dict = dict_data, .max_output_size = ... })
-
-// New:
 var dctx = zstd.DecompressionContext.init(allocator);
 defer dctx.deinit();
 dctx.setMaxWindowSize(1 << 27);
 const out = try dctx.decompressAlloc(compressed);
+defer allocator.free(out);
 ```
 
-> Removed: old `DecompressOptions { dict: ?[]const u8, max_window_size: ?u64, max_output_size: ?usize }` no longer exists. Dictionary handling uses `Dictionary` + `loadDictionary` instead of raw `dict` bytes.
+A dictionary is attached the same way, with `dctx.setDictionary(&dict)`, rather than
+passed per call.
+

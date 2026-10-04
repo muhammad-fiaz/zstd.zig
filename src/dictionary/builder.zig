@@ -1,9 +1,6 @@
-//! Dictionary construction from sample corpora.
-//!
-//! `train` selects representative segments from the corpus. `trainCover` and
-//! `trainFastCover` refine selection with COVER-style parameters (k = segment
-//! stride, d = segment window) so that the tuning knobs influence which
-//! segments are chosen, while producing dictionaries in the same
+//! Dictionary construction from sample corpora. `train` selects representative
+//! segments; `trainCover`/`trainFastCover` refine selection with COVER-style
+//! parameters (k = segment stride, d = segment window). All produce the same
 //! magic + dictID container as `createDictionaryFromData`.
 
 const std = @import("std");
@@ -12,8 +9,8 @@ const constants = @import("../common/constants.zig");
 const dict_mod = @import("dictionary.zig");
 
 pub const DictBuilderParams = struct {
-    dict_size: usize = 112640,
-    dict_id: u32 = 0,
+    dictSize: usize = 112640,
+    dictId: u32 = 0,
     level: u32 = 3,
 };
 
@@ -37,18 +34,18 @@ fn buildFromChunks(
     allocator: std.mem.Allocator,
     samples: []const []const u8,
     chunks: []const Chunk,
-    dict_size: usize,
-    dict_id: u32,
+    dictSize: usize,
+    dictId: u32,
 ) errors.ZstdError!dict_mod.Dictionary {
     var content: std.ArrayList(u8) = .empty;
     defer content.deinit(allocator);
     for (chunks) |c| {
-        if (content.items.len >= dict_size) break;
-        const take = @min(c.len, dict_size - content.items.len);
+        if (content.items.len >= dictSize) break;
+        const take = @min(c.len, dictSize - content.items.len);
         content.appendSlice(allocator, samples[c.sample][c.start .. c.start + take]) catch return error.OutOfMemory;
     }
     if (content.items.len == 0) return error.InvalidDictionary;
-    return dict_mod.createDictionaryFromData(allocator, content.items, dict_id);
+    return dict_mod.createDictionaryFromData(allocator, content.items, dictId);
 }
 
 fn collectChunks(
@@ -71,7 +68,7 @@ fn collectChunks(
 }
 
 /// COVER-style training: rank d-sized chunks by recurrence of their first
-/// k bytes across the corpus, then pack the best chunks up to dict_size.
+/// k bytes across the corpus, then pack the best chunks up to dictSize.
 pub fn trainCoverImpl(
     allocator: std.mem.Allocator,
     samples: []const []const u8,
@@ -108,7 +105,7 @@ pub fn trainCoverImpl(
     defer allocator.free(order);
     for (scored, 0..) |sc, i| order[i] = chunks[sc.idx];
 
-    return buildFromChunks(allocator, samples, order, params.dict_size, params.dict_id);
+    return buildFromChunks(allocator, samples, order, params.dictSize, params.dictId);
 }
 
 /// FastCover variant: like `trainCoverImpl` but only scores every `accel`
@@ -174,10 +171,10 @@ pub fn trainFastCoverImpl(
     defer allocator.free(order);
     for (scored, 0..) |sc, i| order[i] = chunks.items[sc.idx];
 
-    return buildFromChunks(allocator, samples, order, params.dict_size, params.dict_id);
+    return buildFromChunks(allocator, samples, order, params.dictSize, params.dictId);
 }
 
-/// Naive full-corpus trainer: concatenates sample heads until dict_size.
+/// Naive full-corpus trainer: concatenates sample heads until dictSize.
 pub fn trainFromSamples(allocator: std.mem.Allocator, samples: []const []const u8, params: DictBuilderParams) errors.ZstdError!dict_mod.Dictionary {
     if (samples.len == 0) return error.InvalidDictionary;
     var total: usize = 0;
@@ -186,7 +183,7 @@ pub fn trainFromSamples(allocator: std.mem.Allocator, samples: []const []const u
 
     var pos: usize = 0;
     var sample_idx: usize = 0;
-    const buf = allocator.alloc(u8, @min(params.dict_size, total)) catch return error.OutOfMemory;
+    const buf = allocator.alloc(u8, @min(params.dictSize, total)) catch return error.OutOfMemory;
     defer allocator.free(buf);
     while (pos < buf.len) {
         const s = samples[sample_idx % samples.len];
@@ -196,12 +193,12 @@ pub fn trainFromSamples(allocator: std.mem.Allocator, samples: []const []const u
             if (sample_idx >= samples.len * 2) break;
             continue;
         }
-        @memcpy(buf[pos .. pos + copy_len], s[0..copy_len]);
+        std.mem.copyForwards(u8, buf[pos .. pos + copy_len], s[0..copy_len]);
         pos += copy_len;
         sample_idx += 1;
     }
     if (pos == 0) return error.InvalidDictionary;
-    return dict_mod.createDictionaryFromData(allocator, buf[0..pos], params.dict_id);
+    return dict_mod.createDictionaryFromData(allocator, buf[0..pos], params.dictId);
 }
 
 pub const DictionaryBuilder = struct {
@@ -225,9 +222,7 @@ pub const DictionaryBuilder = struct {
     }
 };
 
-// ---------------------------------------------------------------------------
 // Tests
-// ---------------------------------------------------------------------------
 
 const testing = std.testing;
 
@@ -236,7 +231,7 @@ test "trainCover prefers recurring chunks" {
     const hot = "recurring-header-payload-AAAA";
     const cold = "zzzz qqqq wwww xxxx";
     const samples = [_][]const u8{ hot, hot, hot, cold };
-    var dict = try trainCoverImpl(alloc, &samples, .{ .dict_size = 128 }, 6, 14);
+    var dict = try trainCoverImpl(alloc, &samples, .{ .dictSize = 128 }, 6, 14);
     defer dict.deinit();
     try testing.expect(dict.data.len > 0);
     // Hot content should dominate the dictionary.
@@ -245,8 +240,11 @@ test "trainCover prefers recurring chunks" {
 
 test "trainFastCover respects accel stride" {
     const alloc = testing.allocator;
-    const samples = [_][]const u8{"abcdefgh" ** 8};
-    var dict = try trainFastCoverImpl(alloc, &samples, .{ .dict_size = 64 }, 6, 16, 6, 2);
+    const unit = "abcdefgh";
+    var sample_buf: [unit.len * 8]u8 = undefined;
+    for (0..8) |i| std.mem.copyForwards(u8, sample_buf[i * unit.len ..][0..unit.len], unit);
+    const samples = [_][]const u8{&sample_buf};
+    var dict = try trainFastCoverImpl(alloc, &samples, .{ .dictSize = 64 }, 6, 16, 6, 2);
     defer dict.deinit();
     try testing.expect(dict.data.len > 0);
 }

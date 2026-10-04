@@ -4,6 +4,7 @@
 
 | Version | Supported          |
 |---------|--------------------|
+| 0.0.4   | :white_check_mark: |
 | 0.0.3   | :white_check_mark: |
 | < 0.0.3 | :x:                |
 
@@ -33,7 +34,7 @@ advisory once a patch is available.
 zstd.zig decompresses untrusted input by design. The following guarantees apply:
 
 - Malformed, truncated, or hostile compressed data must never cause out-of-bounds
-  reads/writes, undefined behavior, or hangs — only a returned `ZstdError`.
+  reads/writes, undefined behavior, or hangs - only a returned `ZstdError`.
 - Decompression validates the frame magic (`0xFD2FB528`), frame header fields,
   block headers, FSE/Huffman table constraints, sequence offsets against the
   declared window, content size, and the optional XXH64 checksum.

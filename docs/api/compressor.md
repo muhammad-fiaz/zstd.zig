@@ -3,12 +3,12 @@ title: CompressionContext
 description: Reusable compression context with parameter control.
 ---
 
-> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig — every algorithm, frame element, and default table in this document follows that version.
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig - every algorithm, frame element, and default table in this document follows that version.
 
 
 # CompressionContext
 
-A reusable compression context. Create once, compress multiple buffers with the same settings. Defined in `src/compress/context.zig:6` and re-exported as `zstd.CompressionContext` (`src/zstd.zig:23`).
+A reusable compression context. Create once, compress multiple buffers with the same settings. Re-exported as `zstd.CompressionContext`.
 
 ## Definition
 
@@ -157,4 +157,40 @@ var buf: [8192]u8 = undefined;
 const n = try cctx.compress(&buf, data3);
 ```
 
-> Removed names: old `Compressor`, `Compressor.init(opts: CompressOptions)`, `compressAlloc(alloc,src)`, `compress2(dst,src)`, `setParameter(.compression_level, .checksum_flag)`, `reset(ResetDirective)` are replaced by the `CompressionContext` API above.
+## `Encoder`
+
+`zstd.Encoder` is a high-level client-side compression abstraction that wraps `CompressionContext` and supports explicit concurrency and parameter control:
+
+```zig
+pub const Encoder = struct {
+    pub fn init(allocator: std.mem.Allocator, options: CompressionOptions) !Encoder;
+    pub fn deinit(self: *Encoder) void;
+    pub fn reset(self: *Encoder) void;
+    pub fn compress(self: *Encoder, src: []const u8) ![]u8;
+    pub fn compressInto(self: *Encoder, dst: []u8, src: []const u8) !usize;
+    pub fn setLevel(self: *Encoder, level: i32) void;
+    pub fn setChecksum(self: *Encoder, flag: bool) void;
+    pub fn setWorkers(self: *Encoder, count: usize) !void;
+};
+```
+
+### Usage
+
+```zig
+var encoder = try zstd.Encoder.init(allocator, .{ .level = 5, .checksum = true });
+defer encoder.deinit();
+
+const compressed = try encoder.compress("Hello World");
+defer allocator.free(compressed);
+
+// Enable multithreaded compression explicitly
+try encoder.setWorkers(4);
+const mt_compressed = try encoder.compress(large_data);
+defer allocator.free(mt_compressed);
+```
+
+## `Compressor`
+
+`zstd.Compressor` is a direct alias for `zstd.CompressionContext` matching client naming conventions.
+
+

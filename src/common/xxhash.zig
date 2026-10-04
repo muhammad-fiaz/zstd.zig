@@ -83,41 +83,41 @@ fn read32(d: []const u8) u32 {
 
 pub const XxHash64State = struct {
     seed: u64,
-    total_len: usize,
+    totalLen: usize,
     buffer: [32]u8,
     buffered: usize,
     v1: u64,
     v2: u64,
     v3: u64,
     v4: u64,
-    large_len: bool,
+    largeLen: bool,
 
     pub fn init(seed: u64) XxHash64State {
         return .{
             .seed = seed,
-            .total_len = 0,
-            .buffer = [_]u8{0} ** 32,
+            .totalLen = 0,
+            .buffer = @splat(0),
             .buffered = 0,
             .v1 = seed +% PRIME64_1 +% PRIME64_2,
             .v2 = seed +% PRIME64_2,
             .v3 = seed,
             .v4 = seed -% PRIME64_1,
-            .large_len = false,
+            .largeLen = false,
         };
     }
 
     pub fn update(self: *XxHash64State, data: []const u8) void {
-        self.total_len += data.len;
-        if (self.total_len >= 32) self.large_len = true;
+        self.totalLen += data.len;
+        if (self.totalLen >= 32) self.largeLen = true;
         var p: usize = 0;
         if (self.buffered > 0) {
             const need = 32 - self.buffered;
             if (data.len < need) {
-                @memcpy(self.buffer[self.buffered..][0..data.len], data);
+                std.mem.copyForwards(u8, self.buffer[self.buffered..][0..data.len], data);
                 self.buffered += data.len;
                 return;
             } else {
-                @memcpy(self.buffer[self.buffered..][0..need], data[0..need]);
+                std.mem.copyForwards(u8, self.buffer[self.buffered..][0..need], data[0..need]);
                 self.consumeStripe(self.buffer[0..32]);
                 self.buffered = 0;
                 p = need;
@@ -128,7 +128,7 @@ pub const XxHash64State = struct {
         }
         if (p < data.len) {
             const rem = data.len - p;
-            @memcpy(self.buffer[0..rem], data[p..]);
+            std.mem.copyForwards(u8, self.buffer[0..rem], data[p..]);
             self.buffered = rem;
         }
     }
@@ -142,7 +142,7 @@ pub const XxHash64State = struct {
 
     pub fn digest(self: *const XxHash64State) u64 {
         var h64: u64 = undefined;
-        if (self.large_len) {
+        if (self.largeLen) {
             h64 = rotl64(self.v1, 1) +% rotl64(self.v2, 7) +% rotl64(self.v3, 12) +% rotl64(self.v4, 18);
             h64 = mergeAcc(h64, self.v1);
             h64 = mergeAcc(h64, self.v2);
@@ -151,7 +151,7 @@ pub const XxHash64State = struct {
         } else {
             h64 = self.seed +% PRIME64_5;
         }
-        h64 +%= @as(u64, self.total_len);
+        h64 +%= @as(u64, self.totalLen);
         var p: usize = 0;
         const buf = self.buffer[0..self.buffered];
         while (p + 8 <= buf.len) : (p += 8) {
@@ -181,6 +181,31 @@ const testing = @import("std").testing;
 
 test "xxhash64 empty" {
     try testing.expectEqual(@as(u64, 0xEF46DB3751D8E999), xxhash64("", 0));
+}
+
+test "xxhash64 matches the published vectors" {
+    // A wrong checksum constant is invisible: a decoder agreeing with the encoder on
+    // the wrong one would accept every tampered frame. These are the format's
+    // reference values for seed 0, so agreement is with the format.
+    try testing.expectEqual(@as(u64, 0xD24EC4F1A98C6E5B), xxhash64("a", 0));
+    try testing.expectEqual(@as(u64, 0x44BC2CF5AD770999), xxhash64("abc", 0));
+}
+
+test "xxhash64 streamed in pieces matches the one-shot digest" {
+    // The streaming form has its own tail handling for the leftover bytes, so
+    // splitting the input exercises a different path from the single-shot
+    // length branch.
+    var split_at_two = XxHash64State.init(0);
+    split_at_two.update("ab");
+    split_at_two.update("c");
+    try testing.expectEqual(@as(u64, 0x44BC2CF5AD770999), split_at_two.digest());
+
+    // Splitting inside the 8-byte stripe and inside the 4-byte remainder both
+    // have to converge on the same answer.
+    var many = XxHash64State.init(0);
+    const stripe = "0123456789abcdefghijklmnop";
+    for (stripe) |c| many.update(&[_]u8{c});
+    try testing.expectEqual(xxhash64(stripe, 0), many.digest());
 }
 
 test "xxhash64 deterministic" {

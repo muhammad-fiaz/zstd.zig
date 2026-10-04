@@ -1,18 +1,11 @@
 //! Reads an FSE normalized-counter header in compact format: a 4-bit
 //! tableLog field followed by interleaved count values with run-length
 //! coding for repeated zeros.
-
 const std = @import("std");
 const errors = @import("../common/errors.zig");
 const constants = @import("../common/constants.zig");
-
-fn le32At(src: []const u8, i: usize) u32 {
-    return @as(u32, src[i]) |
-        (@as(u32, src[i + 1]) << 8) |
-        (@as(u32, src[i + 2]) << 16) |
-        (@as(u32, src[i + 3]) << 24);
-}
-
+const bits = @import("../common/bits.zig");
+const testing = std.testing;
 /// Reads normalized counts into `normalized[0..max_sv_ptr.*+1]` capacity,
 /// updates `max_sv_ptr` and `table_log_ptr`, returns header bytes consumed.
 pub fn readNCount(
@@ -27,12 +20,12 @@ pub fn readNCount(
     // fixed-width reads stay in bounds.
     if (src.len < 8) {
         var buf: [8]u8 = .{ 0, 0, 0, 0, 0, 0, 0, 0 };
-        @memcpy(buf[0..src.len], src);
-        var max_sv = max_sv_ptr.*;
+        std.mem.copyForwards(u8, buf[0..src.len], src);
+        var maxSv = max_sv_ptr.*;
         var tl: u8 = 0;
-        const n = try readBody(normalized, &max_sv, &tl, &buf);
+        const n = try readBody(normalized, &maxSv, &tl, &buf);
         if (n > src.len) return error.Corruption; // FDBG2
-        max_sv_ptr.* = max_sv;
+        max_sv_ptr.* = maxSv;
         table_log_ptr.* = tl;
         return n;
     }
@@ -50,103 +43,170 @@ fn readBody(
     @memset(normalized, 0);
 
     var ip: usize = 0;
-    var bit_stream: u32 = le32At(src, 0);
-    const tl: u8 = @intCast((bit_stream & 0xF) + constants.min_fse_log);
+    var bitStream: u32 = bits.readLe32(src[0..]);
+    const tl: u8 = @intCast((bitStream & 0xF) + constants.min_fse_log);
     if (tl > constants.max_fse_log or tl < constants.min_fse_log) return error.TableLogTooLarge; // FDBG4
     table_log_ptr.* = tl;
-    bit_stream >>= 4;
-    var bit_count: u32 = 4;
+    bitStream >>= 4;
+    var bitCount: u32 = 4;
 
     var remaining: i32 = (@as(i32, 1) << @intCast(tl)) + 1;
     var threshold: i32 = @as(i32, 1) << @intCast(tl);
-    var nb_bits: u32 = @as(u32, tl) + 1;
+    var nbBits: u32 = @as(u32, tl) + 1;
 
-    var charnum: usize = 0;
+    var charNum: usize = 0;
     var previous0: bool = false;
-    const max_sv1 = max_sv_ptr.* + 1;
+    const maxSv1 = max_sv_ptr.* + 1;
 
     while (true) {
         if (previous0) {
             // Runs of repeated zero counts encoded as consecutive 0b11 pairs.
-            var repeats: u32 = @ctz(~bit_stream | 0x80000000) >> 1;
+            var repeats: u32 = @ctz(~bitStream | 0x80000000) >> 1;
             while (repeats >= 12) {
-                charnum += 3 * 12;
-                if (charnum >= max_sv1) break;
+                charNum += 3 * 12;
+                if (charNum >= maxSv1) break;
                 if (ip <= iend - 7) {
                     ip += 3;
                 } else {
                     const diff = iend - 4 - ip;
-                    bit_count -%= @as(u32, @intCast(diff * 8));
-                    bit_count &= 31;
+                    bitCount -%= @as(u32, @intCast(diff * 8));
+                    bitCount &= 31;
                     ip = iend - 4;
                 }
-                bit_stream = le32At(src, ip) >> @intCast(bit_count & 31);
-                repeats = @ctz(~bit_stream | 0x80000000) >> 1;
+                bitStream = bits.readLe32(src[ip..]) >> @intCast(bitCount & 31);
+                repeats = @ctz(~bitStream | 0x80000000) >> 1;
             }
-            charnum += 3 * repeats;
-            bit_stream >>= @intCast(2 * repeats);
-            bit_count += 2 * repeats;
+            charNum += 3 * repeats;
+            bitStream >>= @intCast(2 * repeats);
+            bitCount += 2 * repeats;
 
-            charnum += bit_stream & 3; // final partial repeat
-            bit_count += 2;
+            charNum += bitStream & 3; // final partial repeat
+            bitCount += 2;
 
-            if (charnum >= max_sv1) break;
+            if (charNum >= maxSv1) break;
             // zero counts stay implicit (buffer pre-zeroed)
 
-            if (ip <= iend - 7 or ip + (bit_count >> 3) <= iend - 4) {
-                ip += bit_count >> 3;
-                bit_count &= 7;
+            if (ip <= iend - 7 or ip + (bitCount >> 3) <= iend - 4) {
+                ip += bitCount >> 3;
+                bitCount &= 7;
             } else {
                 const diff = iend - 4 - ip;
-                bit_count -%= @as(u32, @intCast(diff * 8));
-                bit_count &= 31;
+                bitCount -%= @as(u32, @intCast(diff * 8));
+                bitCount &= 31;
                 ip = iend - 4;
             }
-            bit_stream = le32At(src, ip) >> @intCast(bit_count & 31);
+            bitStream = bits.readLe32(src[ip..]) >> @intCast(bitCount & 31);
         }
 
         const max_val: i32 = (2 * threshold - 1) - remaining;
         var count: i32 = 0;
-        if ((bit_stream & @as(u32, @intCast(threshold - 1))) < @as(u32, @intCast(max_val))) {
-            count = @intCast(bit_stream & @as(u32, @intCast(threshold - 1)));
-            bit_count += nb_bits - 1;
+        // `max_val` goes negative once `remaining` outgrows the range the
+        // current threshold can express; the comparison is against its
+        // two's-complement bit pattern, which makes every such case take the
+        // wide branch below.
+        const max_val_bits: u32 = @bitCast(max_val);
+        if ((bitStream & @as(u32, @intCast(threshold - 1))) < max_val_bits) {
+            count = @intCast(bitStream & @as(u32, @intCast(threshold - 1)));
+            bitCount += nbBits - 1;
         } else {
-            count = @intCast(bit_stream & @as(u32, @intCast(2 * threshold - 1)));
+            count = @intCast(bitStream & @as(u32, @intCast(2 * threshold - 1)));
             if (count >= threshold) count -= max_val;
-            bit_count += nb_bits;
+            bitCount += nbBits;
         }
 
-        count -= 1; // extra accuracy
-        remaining -%= count;
-        if (charnum < normalized.len) normalized[charnum] = @intCast(count);
-        charnum += 1;
+        count -= 1; // extra accuracy: -1 encodes "less than one", 0 encodes "zero"
+        // Both a real count and the -1 "less than one" marker consume one unit
+        // of the table, so the absolute value is what shrinks `remaining`.
+        remaining -= if (count < 0) -count else count;
+        if (charNum < normalized.len) normalized[charNum] = @intCast(count);
+        charNum += 1;
         previous0 = count == 0;
 
         if (remaining < threshold) {
             if (remaining <= 1) break;
-            nb_bits = @as(u32, 31 - @clz(@as(u32, @intCast(remaining)))) + 1;
-            threshold = @as(i32, 1) << @intCast(nb_bits - 1);
+            nbBits = @as(u32, 31 - @clz(@as(u32, @intCast(remaining)))) + 1;
+            threshold = @as(i32, 1) << @intCast(nbBits - 1);
         }
-        if (charnum >= max_sv1) break;
+        if (charNum >= maxSv1) break;
 
-        if (ip <= iend - 7 or ip + (bit_count >> 3) <= iend - 4) {
-            ip += bit_count >> 3;
-            bit_count &= 7;
+        if (ip <= iend - 7 or ip + (bitCount >> 3) <= iend - 4) {
+            ip += bitCount >> 3;
+            bitCount &= 7;
         } else {
             const diff = iend - 4 - ip;
-            bit_count -%= @as(u32, @intCast(diff * 8));
-            bit_count &= 31;
+            bitCount -%= @as(u32, @intCast(diff * 8));
+            bitCount &= 31;
             ip = iend - 4;
         }
-        bit_stream = le32At(src, ip) >> @intCast(bit_count & 31);
+        bitStream = bits.readLe32(src[ip..]) >> @intCast(bitCount & 31);
     }
 
     if (remaining != 1) return error.Corruption; // FDBG5
-    if (charnum > max_sv1) return error.MaxSymbolValueTooSmall; // FDBG6
-    if (bit_count > 32) return error.Corruption; // FDBG7
+    if (charNum > maxSv1) return error.MaxSymbolValueTooSmall; // FDBG6
+    if (bitCount > 32) return error.Corruption; // FDBG7
 
-    max_sv_ptr.* = charnum - 1;
-    ip += (bit_count + 7) >> 3;
+    max_sv_ptr.* = charNum - 1;
+    ip += (bitCount + 7) >> 3;
     if (ip > iend) return error.Corruption; // FDBG8
     return ip;
+}
+test "readNCount accepts a header the encoder wrote" {
+    // Regression: a header whose counts reached the "less than one" marker drove
+    // `remaining` the wrong way, so counts no longer summed to `1 << tableLog`
+    // and every block using them was rejected. This covers the -1 marker, the
+    // zero runs and the short-buffer path at once.
+    const fse_w = @import("compress.zig");
+    var written_norm: [64]i16 = @splat(0);
+    // A wide, uneven distribution: heavy symbols, a rare one marked "less than one",
+    // and one the alphabet cannot produce at all, summing to `1 << table_log`.
+    written_norm[0] = 1;
+    written_norm[1] = 1;
+    written_norm[2] = 1;
+    written_norm[3] = 16;
+    written_norm[4] = 8;
+    written_norm[5] = 4;
+    written_norm[6] = -1;
+    const max_sv = 6;
+    const table_log: u8 = 5;
+    var header: [64]u8 = undefined;
+    const used = try fse_w.writeNCount(&header, written_norm[0 .. max_sv + 1], max_sv, table_log);
+    try testing.expect(used > 0);
+
+    var norm: [64]i16 = undefined;
+    var max_read: usize = max_sv;
+    var log_read: u8 = 0;
+    const read = try readNCount(&norm, &max_read, &log_read, header[0..used]);
+    try testing.expectEqual(used, read);
+    try testing.expectEqual(table_log, log_read);
+    try testing.expectEqual(max_sv, max_read);
+    for (written_norm[0 .. max_sv + 1], 0..) |c, i| try testing.expectEqual(c, norm[i]);
+}
+test "readNCount either rejects a header or returns a table that adds up" {
+    // Property: whatever the reader accepts must describe a table the builder
+    // can turn into a decoding table, i.e. the counts must sum to exactly
+    // `1 << tableLog`. Anything else has to be an error, never a table that
+    // silently fails later.
+    var prng = std.Random.DefaultPrng.init(0x5EED);
+    const random = prng.random();
+    var trial: usize = 0;
+    while (trial < 512) : (trial += 1) {
+        var header: [16]u8 = undefined;
+        random.bytes(&header);
+        var norm: [64]i16 = undefined;
+        var max_sv: usize = 63;
+        var table_log: u8 = 0;
+        const result = readNCount(&norm, &max_sv, &table_log, &header);
+        if (result) |used| {
+            try testing.expect(used >= 1 and used <= header.len);
+            try testing.expect(table_log >= constants.min_fse_log);
+            try testing.expect(table_log <= constants.max_fse_log);
+            try testing.expect(max_sv < 64);
+            var total: i32 = 0;
+            for (norm[0 .. max_sv + 1]) |c| {
+                try testing.expect(c >= -1);
+                total += if (c < 0) 1 else c;
+            }
+            try testing.expectEqual(@as(i32, 1) << @intCast(table_log), total);
+        } else |_| {}
+    }
 }

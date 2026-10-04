@@ -3,23 +3,23 @@ title: Dictionary / DictionaryBuilder
 description: Dictionary compression and decompression types.
 ---
 
-> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig — every algorithm, frame element, and default table in this document follows that version.
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig - every algorithm, frame element, and default table in this document follows that version.
 
 
 # Dictionary / DictionaryBuilder
 
-Dictionary support is implemented in `src/dictionary/dictionary.zig:5` and `src/dictionary/builder.zig:51`, re-exported as `zstd.Dictionary`, `zstd.DictionaryBuilder`, `zstd.DictBuilderParams` (`src/zstd.zig:25-27`).
+The dictionary's content is the encoder's prefix history and the decoder's initial window for the frame, and the frame header records the dictionary ID so a mismatched dictionary is rejected. Re-exported as `zstd.Dictionary`, `zstd.DictionaryBuilder`, `zstd.DictBuilderParams`.
 
 ## Dictionary
 
-Loaded dictionary with raw `data` (including 8-byte header `MAGIC_DICTIONARY + dict_id`) and helpers.
+Loaded dictionary with raw `data` (including 8-byte header `MAGIC_DICTIONARY + dictId`) and helpers.
 
 ### Definition
 
 ```zig
 pub const Dictionary = struct {
     data: []u8,
-    dict_id: u32,
+    dictId: u32,
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: *Dictionary) void
@@ -32,7 +32,7 @@ pub const Dictionary = struct {
 
 ```zig
 pub fn loadDictionary(allocator: std.mem.Allocator, data: []const u8) ZstdError!Dictionary
-pub fn createDictionaryFromData(allocator: std.mem.Allocator, data: []const u8, dict_id: u32) ZstdError!Dictionary
+pub fn createDictionaryFromData(allocator: std.mem.Allocator, data: []const u8, dictId: u32) ZstdError!Dictionary
 ```
 
 ### Usage
@@ -50,23 +50,23 @@ defer loaded.deinit();
 // Access content without header
 const c = dict.content();
 
-// Use dict_id in frame header
-const compressed = try zstd.compressWithOptions(allocator, data, .{ .dict_id = dict.dictId() });
+// Use dictId in frame header
+const compressed = try zstd.compressWithOptions(allocator, data, .{ .dictId = dict.dictId() });
 defer allocator.free(compressed);
 const hdr = try zstd.getFrameHeader(compressed);
-std.debug.assert(hdr.dict_id == dict.dictId());
+std.debug.assert(hdr.dictId == dict.dictId());
 ```
 
 ## DictionaryBuilder
 
-Builder for training dictionaries from samples. Defined in `src/dictionary/builder.zig:51`:
+Builder for training dictionaries from samples. Defined:
 
 ### Definition
 
 ```zig
 pub const DictBuilderParams = struct {
-    dict_size: usize = 112640,
-    dict_id: u32 = 0,
+    dictSize: usize = 112640,
+    dictId: u32 = 0,
     level: u32 = 3,
 };
 
@@ -89,7 +89,7 @@ pub fn trainFastCoverImpl(allocator, samples, params, k, d, f, accel) !Dictionar
 ### Usage
 
 ```zig
-var builder = zstd.DictionaryBuilder.init(allocator, .{ .dict_size = 8192, .dict_id = 999 });
+var builder = zstd.DictionaryBuilder.init(allocator, .{ .dictSize = 8192, .dictId = 999 });
 
 const samples = &[_][]const u8{ s1, s2, s3 };
 var dict = try builder.train(samples);
@@ -113,7 +113,7 @@ for (0..100) |i| {
 }
 defer for (samples.items) |s| allocator.free(s);
 
-var builder = zstd.DictionaryBuilder.init(allocator, .{ .dict_size = 8192 });
+var builder = zstd.DictionaryBuilder.init(allocator, .{ .dictSize = 8192 });
 var d = try builder.train(samples.items);
 defer d.deinit();
 var cd = try builder.trainCover(samples.items, 6, 8);
@@ -126,18 +126,18 @@ defer fd.deinit();
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `dict_size` | `usize` | `112640` | Desired dictionary size |
-| `dict_id` | `u32` | `0` | Dictionary ID to embed |
+| `dictSize` | `usize` | `112640` | Desired dictionary size |
+| `dictId` | `u32` | `0` | Dictionary ID to embed |
 | `level` | `u32` | `3` | Compression level hint |
 
 ## Removed Old API
 
 | Old (removed) | New |
 |---------------|-----|
-| `CDict.init(dict_buffer, level)` / `CDict.compress` | `Dictionary` + `createDictionaryFromData` / `compressWithOptions(.dict_id)` |
+| `CDict.init(dict_buffer, level)` / `CDict.compress` | `Dictionary` + `createDictionaryFromData` / `compressWithOptions(.dictionary)` |
 | `DDict.init(dict_buffer)` / `DDict.decompress` | `Dictionary` + `loadDictionary` / `decompress` |
-| `compressUsingDict(alloc, src, dict, level)` | `compressWithOptions(alloc, src, .{ .dict_id = dict.dictId() })` |
-| `decompressUsingDict(alloc, src, dict)` | `decompress(alloc, src)` (dictionary-aware header) |
-| `getDictIDFromDict` / `getDictIDFromFrame` | `dict.dictId()` / `(try getFrameHeader(src)).dict_id` |
+| `compressUsingDict(alloc, src, dict, level)` | `compressWithOptions(alloc, src, .{ .dictionary = &dict })` |
+| `decompressUsingDict(alloc, src, dict)` | `decompressWithOptions(alloc, src, .{ .dictionary = &dict })` |
+| `getDictIDFromDict` / `getDictIDFromFrame` | `dict.dictId()` / `(try getFrameHeader(src)).dictId` |
 | `trainFromSamples(buf, sizes, cap)` / `finalizeDictionary` | `DictionaryBuilder.train*` / `DictBuilderParams` |
-| `DictParams { compression_level, dict_id }` | `DictBuilderParams { dict_size, dict_id, level }` |
+| `DictParams { compression_level, dictId }` | `DictBuilderParams { dictSize, dictId, level }` |

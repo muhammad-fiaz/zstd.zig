@@ -3,44 +3,50 @@ title: Installation
 description: How to install and set up zstd.zig in your Zig project.
 ---
 
-> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig � every algorithm, frame element, and default table in this document follows that version.
+> **Spec conformance:** zstd.zig implements the [Zstandard 1.6.0 specification](https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md) natively in Zig - every algorithm, frame element, and default table in this document follows that version.
 
 
 # Installation
 
 ## Requirements
 
-- **Zig 0.16.0** (required) — download from [ziglang.org](https://ziglang.org/download/)
-- No external dependencies required — pure Zig implementation
+- **Zig 0.17.0** (required) - download from [ziglang.org](https://ziglang.org/download/)
+- No external dependencies required - pure Zig implementation
 - Supported OS: Windows 10+, Linux, macOS
 - Supported architectures: x86_64, aarch64, x86
 
 ::: warning Version Requirement
-This library requires **Zig 0.16.0** as declared in `build.zig.zon` (`minimum_zig_version = "0.16.0"`). Older versions are not supported.
+This library targets the new **Zig 0.17.0** release and standard library APIs (`std.Io`, language builtins, etc.). **Zig 0.16.0 is not supported** in this release (`v0.0.4+`). If your project is still on Zig 0.16.0, please use library version **0.0.3** (the previous stable release).
 :::
 
 ## Setup
 
-### Method 1: Zig Fetch (Recommended) — Latest Release
+### Method 1: Zig Fetch (Recommended) - Latest Release (Zig 0.17.0)
 
 ```bash
-zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.3.tar.gz
+zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.4.tar.gz
 ```
 
-This corresponds to `build.zig.zon` version `0.0.3`:
+This corresponds to `build.zig.zon` version `0.0.4`:
 
 ```zig
 .{
     .name = .zstd,
-    .version = "0.0.3",
-    .minimum_zig_version = "0.16.0",
+    .version = "0.0.4",
+    .minimum_zig_version = "0.17.0",
     // ...
 }
 ```
 
-### Method 2: Zig Fetch (Main Branch)
+> **On Zig 0.16?** Zig 0.16.0 is not supported in `v0.0.4+`. Fetch the previous stable release instead:
+>
+> ```bash
+> zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.3.tar.gz
+> ```
 
-Use the latest development version from the `main` branch:
+### Method 2: Zig Fetch (Dev Branch - Latest Updates)
+
+Use the latest development version from the `dev` branch:
 
 ```bash
 zig fetch --save git+https://github.com/muhammad-fiaz/zstd.zig.git
@@ -53,7 +59,7 @@ Add the dependency to your `build.zig.zon`:
 ```zig
 .dependencies = .{
     .zstd = .{
-        .url = "https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.3.tar.gz",
+        .url = "https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.4.tar.gz",
         .hash = "...", // Run `zig fetch --save <url>` to generate the hash.
     },
 },
@@ -107,13 +113,29 @@ const decompressed = try zstd.decompress(allocator, compressed);
 defer allocator.free(decompressed);
 ```
 
+For repeated work, prefer one reusable context instead of one-shot calls:
+
+```zig
+var ctx = zstd.Context.init(allocator);
+defer ctx.deinit();
+
+const c = try ctx.compress(data);
+defer allocator.free(c);
+const d = try ctx.decompress(c);
+defer allocator.free(d);
+```
+
 ## Verify Installation
 
 ```bash
 zig build                    # Build library
 zig build test --summary all # Run all tests
-zig build run-all-examples   # Run all 12 examples
+zig build run-all-examples   # Run all 20 examples
+zig build check              # Compile tests and examples without running
 ```
+
+`zig build test` verifies compatibility against reference `zstd` if available,
+found through `ZSTD_REFERENCE_PATH`, then `PATH`, then the usual install locations.
 
 If all tests pass, zstd.zig is properly installed.
 

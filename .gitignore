@@ -16,6 +16,10 @@ tmp/
 example_input.txt
 example_output.txt.zst
 example_restored.txt
+large_input.txt
+large_compressed.zst
+large_decompressed.txt
+
 
 # IDE
 .vscode/
@@ -25,3 +29,5 @@ example_restored.txt
 # Reference C implementation checkout (local only)
 zstd/
 temp_*.py
+*.bin
+*.txt

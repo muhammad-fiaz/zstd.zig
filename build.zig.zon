@@ -1,7 +1,7 @@
 .{
     .name = .zstd,
-    .version = "0.0.3",
-    .minimum_zig_version = "0.16.0",
+    .version = "0.0.4",
+    .minimum_zig_version = "0.17.0",
     .paths = .{
         "build.zig",
         "build.zig.zon",

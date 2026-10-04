@@ -12,7 +12,7 @@ The decoder implements the complete Zstandard entropy layer natively, following 
 | Feature | Status |
 |---------|--------|
 | `Raw_Block` / `RLE_Block` | ✅ |
-| `Compressed_Block` — raw / RLE literals | ✅ |
+| `Compressed_Block` - raw / RLE literals | ✅ |
 | Huffman-coded literals (`set_compressed`) | ✅ single-stream & 4-stream, X1 flat tables |
 | Treeless literals (`set_repeat`, reuses prior table) | ✅ carried per-frame |
 | Sequence FSE modes: predefined / RLE / compressed / repeat | ✅ all four |
@@ -20,7 +20,7 @@ The decoder implements the complete Zstandard entropy layer natively, following 
 | Entropy + rep-offset carry-over across blocks in a frame | ✅ |
 | XXH64 content checksum validation | ✅ |
 
-Interoperability is verified bidirectionally against the official C `zstd` v1.6.0 CLI at levels 1–22 including `--ultra -22`.
+Interoperability is verified bidirectionally against the official C `zstd` v1.6.0 CLI at levels 1 - 22 including `--ultra -22`.
 
 ## One-Shot Decompression
 
@@ -31,40 +31,40 @@ const decompressed = try zstd.decompress(allocator, compressed);
 defer allocator.free(decompressed);
 ```
 
-Signature (`src/zstd.zig:59`):
+Signature:
 
 ```zig
 pub fn decompress(allocator: std.mem.Allocator, src: []const u8) anyerror![]u8
 ```
 
-Decompress into a preallocated buffer (`src/zstd.zig:77`):
+Decompress into a preallocated buffer:
 
 ```zig
-pub fn decompressInto(dst: []u8, src: []const u8) ZstdError!usize
+pub fn decompressInto(allocator: std.mem.Allocator, dst: []u8, src: []const u8) ZstdError!usize
 // usage
 var out: [1 << 16]u8 = undefined;
-const written = try zstd.decompressInto(&out, compressed);
+const written = try zstd.decompressInto(allocator, &out, compressed);
 ```
 
 Bounding / sizing helpers:
 
 ```zig
-const bound = try zstd.decompressBound(compressed); // estimated decompressed size (src/zstd.zig:81)
-const frame_size = try zstd.findFrameCompressedSize(compressed); // exact frame size
+const bound = try zstd.decompressBound(allocator, compressed); // estimated decompressed size
+const frame_size = try zstd.findFrameCompressedSize(allocator, compressed); // exact frame size
 ```
 
 ## DecompressionOptions
 
-`DecompressionOptions` is defined in `src/decompress/context.zig:41`:
+`DecompressionOptions` is defined:
 
 ```zig
 pub const DecompressionOptions = struct {
-    max_window_size: usize = 1 << 27,
-    force_ignore_checksum: bool = false,
+    maxWindowSize: usize = 1 << 27,
+    forceIgnoreChecksum: bool = false,
 };
 ```
 
-It is used by lower-level context configuration (currently `DecompressionContext` stores `max_window_size` directly). Top-level `zstd.decompress` does not take options — configure via context:
+It is used by lower-level context configuration (currently `DecompressionContext` stores `maxWindowSize` directly). Top-level `zstd.decompress` does not take options - configure via context:
 
 ```zig
 var dctx = zstd.DecompressionContext.init(allocator);
@@ -74,14 +74,13 @@ dctx.setMaxWindowSize(1 << 27);
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `max_window_size` | `usize` | `1 << 27` (128 MB) | Maximum allowed window size for safety |
-| `force_ignore_checksum` | `bool` | `false` | Skip checksum verification if set |
+| `maxWindowSize` | `usize` | `1 << 27` (128 MB) | Maximum allowed window size for safety |
+| `forceIgnoreChecksum` | `bool` | `false` | Skip checksum verification if set |
 
-> Removed: old `DecompressOptions { dict, max_output_size }` no longer exists. Dictionary handling uses `Dictionary` type and `loadDictionary` instead of raw `dict` bytes.
 
 ## Reusable DecompressionContext
 
-Reuse for multiple buffers (`src/decompress/context.zig:6`):
+Reuse for multiple buffers:
 
 ```zig
 var dctx = zstd.DecompressionContext.init(allocator);
@@ -109,11 +108,10 @@ const n = try dctx.decompress(&out, compressed);
 | `setMaxWindowSize` | `setMaxWindowSize(self: *DecompressionContext, size: usize) void` | Set window size limit |
 | `reset` | `reset(self: *DecompressionContext) void` | Reset internal stream state |
 
-> Removed names: old `Decompressor`, `Decompressor.init(allocator, opts)`, `decompress()` returning owned slice without `decompressAlloc` are replaced by `DecompressionContext` above.
 
 ## Frame Inspection
 
-Inspect zstd frame metadata without decompressing — top-level functions in `src/zstd.zig:100-132`:
+Inspect zstd frame metadata without decompressing - top-level functions:
 
 ### Check if data is a zstd frame
 
@@ -154,19 +152,19 @@ pub fn getFrameContentSize(src: []const u8) u64
 
 ```zig
 const hdr = try zstd.getFrameHeader(compressed);
-std.debug.print("window_size={d} content_size={d} dict_id={d} checksum={} header_size={d} block_size_max={d}\n",
-    .{ hdr.window_size, hdr.content_size, hdr.dict_id, hdr.checksum_flag, hdr.header_size, hdr.block_size_max });
+std.debug.print("windowSize={d} contentSize={d} dictId={d} checksum={} headerSize={d} blockSizeMax={d}\n",
+    .{ hdr.windowSize, hdr.contentSize, hdr.dictId, hdr.checksumFlag, hdr.headerSize, hdr.blockSizeMax });
 ```
 
 ```zig
 pub const FrameHeader = struct {
-    frame_type: FrameType, // .regular or .skippable
-    header_size: u32,
-    window_size: u64,
-    block_size_max: u32,
-    dict_id: u32,
-    checksum_flag: bool,
-    content_size: u64,
+    frameType: FrameType, // .regular or .skippable
+    headerSize: u32,
+    windowSize: u64,
+    blockSizeMax: u32,
+    dictId: u32,
+    checksumFlag: bool,
+    contentSize: u64,
 };
 pub fn getFrameHeader(src: []const u8) ZstdError!FrameHeader
 ```
@@ -174,20 +172,20 @@ pub fn getFrameHeader(src: []const u8) ZstdError!FrameHeader
 ### Get compressed frame size
 
 ```zig
-const size = try zstd.findFrameCompressedSize(compressed);
+const size = try zstd.findFrameCompressedSize(allocator, compressed);
 std.debug.print("Frame size: {d} bytes\n", .{size});
 ```
 
 ```zig
-pub fn findFrameCompressedSize(src: []const u8) ZstdError!usize
+pub fn findFrameCompressedSize(allocator: std.mem.Allocator, src: []const u8) ZstdError!usize
 ```
 
 ### Get dictionary ID via header
 
 ```zig
 const hdr = try zstd.getFrameHeader(compressed);
-if (hdr.dict_id != 0) {
-    std.debug.print("Dictionary ID: {d}\n", .{hdr.dict_id});
+if (hdr.dictId != 0) {
+    std.debug.print("Dictionary ID: {d}\n", .{hdr.dictId});
 }
 ```
 
@@ -205,8 +203,6 @@ const m = try zstd.readSkippableFrame(&out, buf[0..n]);
 pub fn writeSkippableFrame(dst: []u8, data: []const u8, magic_variant: u32) usize
 pub fn readSkippableFrame(dst: []u8, src: []const u8) ZstdError!usize
 ```
-
-> Removed names: old `zstd.Frame.isFrame`, `zstd.Frame.contentSize` returning `union(enum){known, unknown, error}`, `zstd.Frame.compressedSize`, `zstd.Frame.dictId`, `zstd.Frame.inspect` no longer exist — use the top-level functions above.
 
 ## Error Handling
 

@@ -5,51 +5,56 @@ description: Streaming decompression with StreamingDecompressor and backpressure
 
 # Streaming Decompression
 
-`examples/streaming_decompression.zig` — `StreamingDecompressor` / `DStream`.
+`examples/streaming_decompression.zig` - `StreamingDecompressor` / `DStream`.
 
 ## Client Code
 
 ```zig
-const original = "Streaming decompression handles partial input and output buffers with backpressure. " ** 10;
-const compressed = try zstd.compress(allocator, original);
-defer allocator.free(compressed);
+const std = @import("std");
+const zstd = @import("zstd");
 
-var dstream = zstd.StreamingDecompressor.init(allocator);
-defer dstream.deinit();
+pub fn main() !void {
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-var out: [1 << 16]u8 = undefined;
-var out_pos: usize = 0;
-var in_pos: usize = 0;
-const chunk_size: usize = 64;
-while (in_pos < compressed.len) {
-    const chunk = compressed[in_pos..@min(in_pos + chunk_size, compressed.len)];
-    const res = try dstream.decompressStream(out[out_pos..], chunk);
-    // res = { in_consumed: usize, out_produced: usize, needs_more: bool }
-    in_pos += res.in_consumed;
-    out_pos += res.out_produced;
-    if (res.needs_more and in_pos >= compressed.len) break;
+    var original: std.ArrayList(u8) = .empty;
+    defer original.deinit(allocator);
+    for (0..10) |_| try original.appendSlice(allocator, "Streaming decompression handles partial input and output buffers with backpressure. ");
+
+    const compressed = try zstd.compress(allocator, original.items);
+    defer allocator.free(compressed);
+    var dstream = zstd.StreamingDecompressor.init(allocator);
+    defer dstream.deinit();
+    var out: [1 << 16]u8 = undefined;
+    var outPos: usize = 0;
+    var inPos: usize = 0;
+    const chunkSize: usize = 64;
+    while (inPos < compressed.len) {
+        const chunk = compressed[inPos..@min(inPos + chunkSize, compressed.len)];
+        const res = try dstream.decompressStream(out[outPos..], chunk);
+        inPos += res.inConsumed;
+        outPos += res.outProduced;
+        if (res.needsMore and inPos >= compressed.len) break;
+    }
+    std.debug.print("Stream decompressed {d} bytes\n", .{outPos});
+    std.debug.assert(std.mem.eql(u8, original.items, out[0..outPos]));
+    std.debug.print("Verified streaming decompression\n", .{});
 }
-std.debug.assert(std.mem.eql(u8, original, out[0..out_pos]));
-
-// Convenience
-var dstream2 = zstd.StreamingDecompressor.init(allocator);
-defer dstream2.deinit();
-var out2: [1 << 16]u8 = undefined;
-const n = try dstream2.decompressAll(&out2, compressed);
 ```
 
 ## Output
 
 ```text
-Stream decompressed 840 bytes
+Stream decompressed 16800 bytes from 135 bytes of input
 Verified streaming decompression
 ```
 
 ## Explanation
 
-- `StreamingDecompressor` maintains `in_buffer`/`out_buffer`, `stage` (`header` → `blocks` → `checksum` → `done`) and `frame_header`.
+- `StreamingDecompressor` keeps input and output buffers, the current stage, and the frame header across calls, so a frame split across any number of calls decodes identically to a whole-buffer decode.
 - Handles `1-byte` chunks, `skippable` frames, `multiple frames`, `truncated` checks, and `ChecksumWrong`.
-- `decompressAll` is a one-shot helper delegating to `decompress/decompress.zig:92`.
+- There is no one-shot method. `zstd.decompress` is the one-shot path; driving `decompressStream` is the point of this type.
 
 Run:
 
