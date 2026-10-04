@@ -31,30 +31,15 @@ scoop install zig
 ### Building
 
 ```bash
-zig build            # Build the library
-zig build test       # Run all tests
-zig build check      # Compile tests and examples for another target without running
-zig build fmt        # Format
-zig build docs       # Build the documentation site
+zig build                    # Build the library
+zig build test               # Run all tests
+zig build test --summary all # Detailed test summary
+zig build check              # Compile tests and examples for target validation
+zig fmt .                    # Format source code
+zig build docs               # Build the documentation site
 ```
 
-Concurrency, fuzzing, and throughput have their own steps, each scaled by
-environment variables so a CI run stays short:
-
-```bash
-STRESS_ROUNDS=1 STRESS_CLIENTS=2 zig build stress   # pool waves, concurrent compressors
-FUZZ_ITERS=60 zig build fuzz                        # seeded mutations, round trips, legacy frames
-zig build bench -- --quick                          # small throughput matrix; no flag for the full one
-```
-
-`FUZZ_DEEP=1` lifts the payload-size pairing between the round-trip target and
-the expensive levels, so every level meets every size at the cost of a much
-longer run.
-
-The differential tests need a reference `zstd` binary, and they never skip: a run that
-cannot find one fails. It is located through `ZSTD_REFERENCE_PATH` first, then the
-first `zstd` on `PATH`, then the usual install locations, so on a machine with zstd
-installed `zig build test` is already the full run and nothing needs configuring.
+The differential tests check compatibility against a reference `zstd` binary if available. It is located through `ZSTD_REFERENCE_PATH` first, then the first `zstd` on `PATH`, then the standard install locations.
 
 ### Running Examples
 
@@ -66,6 +51,7 @@ zig build run-custom_strategy
 zig build run-custom_allocator
 zig build run-error_handling
 zig build run-file_compression
+zig build run-large_file_compression
 zig build run-parallel_compression
 zig build run-window_limit
 zig build run-compression_bound
@@ -80,7 +66,7 @@ zig build run-legacy_decompression
 ```
 
 Each example's step is named `run-<example file name>`. `zig build run-all-examples`
-runs all of them, and `zig build check` compiles them for another target without
+runs all 19 of them, and `zig build check` compiles them for another target without
 running, which is what CI uses for cross-compilation.
 
 ## Code Style
@@ -159,21 +145,14 @@ pub fn main() !void {
 ```
 
 ## Testing
-
+ 
 All changes must pass the test suite:
-
+ 
 ```bash
-zig build test
+zig build test --summary all
+zig build run-all-examples
 ```
-
-Anything touching the pool, the multithreaded compressor, or the frame writers
-also needs the concurrency and fuzz steps, which CI runs on native targets:
-
-```bash
-STRESS_ROUNDS=1 STRESS_CLIENTS=2 zig build stress
-FUZZ_ITERS=60 zig build fuzz
-```
-
+ 
 Tests should:
 * Cover the new functionality
 * Test error cases

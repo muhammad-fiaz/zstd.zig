@@ -163,10 +163,8 @@ pub const Pool = struct {
     pub fn joinJobs(self: *Pool) void {
         const io = self.io;
         self.mutex.lock(io) catch unreachable;
+        defer self.mutex.unlock(io);
         const is_worker = (current_pool == self);
-        if (is_worker) {
-            self.numWorkersWaitingInJoin += 1;
-        }
 
         while (!self.queueEmpty or self.numThreadsBusy > self.numWorkersWaitingInJoin) {
             if (!self.queueEmpty) {
@@ -179,17 +177,20 @@ pub const Pool = struct {
                 job.function(job.arg);
 
                 self.mutex.lock(io) catch unreachable;
-                self.pushCond.signal(io);
+                self.pushCond.broadcast(io);
             } else {
+                if (is_worker) {
+                    self.numWorkersWaitingInJoin += 1;
+                    if (self.queueEmpty and self.numThreadsBusy <= self.numWorkersWaitingInJoin) {
+                        self.pushCond.broadcast(io);
+                        self.numWorkersWaitingInJoin -= 1;
+                        break;
+                    }
+                }
                 self.pushCond.wait(io, &self.mutex) catch {};
+                if (is_worker) self.numWorkersWaitingInJoin -= 1;
             }
         }
-
-        if (is_worker) {
-            self.numWorkersWaitingInJoin -= 1;
-            self.pushCond.signal(io);
-        }
-        self.mutex.unlock(io);
     }
 
     /// Changes the number of workers. Growing spawns new threads; shrinking
@@ -259,7 +260,7 @@ pub const Pool = struct {
 
             self.mutex.lock(io) catch unreachable;
             self.numThreadsBusy -= 1;
-            self.pushCond.signal(io);
+            self.pushCond.broadcast(io);
             self.mutex.unlock(io);
         }
     }

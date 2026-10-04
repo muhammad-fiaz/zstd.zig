@@ -48,11 +48,6 @@ pub fn build(b: *std.Build) void {
     });
     docs_step.dependOn(&install_docs.step);
 
-    // `zig build fmt` - format the tree with the bundled Zig toolchain.
-    const fmt_step = b.step("fmt", "Format all Zig sources");
-    const fmt = b.addFmt(.{ .paths = &.{ b.path("src"), b.path("examples"), b.path("build.zig") } });
-    fmt_step.dependOn(&fmt.step);
-
     const examples = [_]struct { name: []const u8, file: []const u8 }{
         .{ .name = "basic_compression", .file = "examples/basic_compression.zig" },
         .{ .name = "custom_level", .file = "examples/custom_level.zig" },
@@ -69,6 +64,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "prepared_dictionary", .file = "examples/prepared_dictionary.zig" },
         .{ .name = "window_limit", .file = "examples/window_limit.zig" },
         .{ .name = "file_compression", .file = "examples/file_compression.zig" },
+        .{ .name = "large_file_compression", .file = "examples/large_file_compression.zig" },
         .{ .name = "custom_strategy", .file = "examples/custom_strategy.zig" },
         .{ .name = "long_distance_matching", .file = "examples/long_distance_matching.zig" },
         .{ .name = "parallel_compression", .file = "examples/parallel_compression.zig" },

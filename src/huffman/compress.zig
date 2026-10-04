@@ -708,7 +708,7 @@ fn decodeLiteralsSection(
 ) errors.ZstdError!usize {
     const huff_decompress = @import("decompress.zig");
     if (src.len < 1) return error.Corruption;
-    const mode: Mode = @fromBackingInt(@intCast(src[0] & 3));
+    const mode: Mode = @fromBackingInt(@intCast(@as(u2, @truncate(src[0] & 3))));
     const size_format = (src[0] >> 2) & 3;
     switch (mode) {
         .raw, .rle => {
@@ -979,7 +979,7 @@ test "compressLiteralsSection round trips a wide alphabet" {
     var dst: [16384]u8 = undefined;
     const n = try compressLiteralsSection(&dst, src, &state);
     try testing.expect(n > 0);
-    try testing.expectEqual(Mode.compressed, @as(Mode, @fromBackingInt(@intCast(dst[0] & 3))));
+    try testing.expectEqual(Mode.compressed, @as(Mode, @fromBackingInt(@intCast(@as(u2, @truncate(dst[0] & 3))))));
     var out: [16384]u8 = undefined;
     const m = try decodeLiteralsSection(testing.allocator, &out, dst[0..n], &decoder_state);
     try testing.expectEqualSlices(u8, src, out[0..m]);
@@ -992,12 +992,12 @@ test "compressLiteralsSection re-uses the table on the second block" {
     var state: LiteralsState = .{};
     var dst: [16384]u8 = undefined;
     const first = try compressLiteralsSection(&dst, src, &state);
-    try testing.expectEqual(Mode.compressed, @as(Mode, @fromBackingInt(@intCast(dst[0] & 3))));
+    try testing.expectEqual(Mode.compressed, @as(Mode, @fromBackingInt(@intCast(@as(u2, @truncate(dst[0] & 3))))));
     try testing.expect(first > 0);
 
     var dst2: [16384]u8 = undefined;
     const second = try compressLiteralsSection(&dst2, src, &state);
-    try testing.expectEqual(Mode.treeless, @as(Mode, @fromBackingInt(@intCast(dst2[0] & 3))));
+    try testing.expectEqual(Mode.treeless, @as(Mode, @fromBackingInt(@intCast(@as(u2, @truncate(dst2[0] & 3))))));
     try testing.expect(second < first);
 }
 
@@ -1017,7 +1017,7 @@ test "compressLiteralsSection emits raw for a tiny alternating payload" {
     var dst: [512]u8 = undefined;
     const src = [_]u8{ 0, 1, 0, 1, 0, 1 };
     const n = try compressLiteralsSection(&dst, &src, &state);
-    try testing.expectEqual(Mode.raw, @as(Mode, @fromBackingInt(@intCast(dst[0] & 3))));
+    try testing.expectEqual(Mode.raw, @as(Mode, @fromBackingInt(@intCast(@as(u2, @truncate(dst[0] & 3))))));
     try testing.expectEqual(src.len + 1, n);
 }
 
@@ -1037,7 +1037,7 @@ test "compressLiteralsSection describes a fresh table after a reset" {
     _ = try compressLiteralsSection(&dst, src, &state);
     state.reset();
     const n = try compressLiteralsSection(&dst, src, &state);
-    try testing.expectEqual(Mode.compressed, @as(Mode, @fromBackingInt(@intCast(dst[0] & 3))));
+    try testing.expectEqual(Mode.compressed, @as(Mode, @fromBackingInt(@intCast(@as(u2, @truncate(dst[0] & 3))))));
     try testing.expect(n > 0);
 }
 
@@ -1126,7 +1126,7 @@ test "treeless sections keep decoding across many blocks" {
         const got = try decodeLiteralsSection(alloc, &out, dst[0..written], &dec_state);
         try testing.expectEqual(n, got);
         try testing.expectEqualSlices(u8, src[0..n], out[0..got]);
-        if (@as(Mode, @fromBackingInt(@intCast(dst[0] & 3))) == .treeless) treeless_seen = true;
+        if (@as(Mode, @fromBackingInt(@intCast(@as(u2, @truncate(dst[0] & 3))))) == .treeless) treeless_seen = true;
     }
     try testing.expect(treeless_seen);
 }

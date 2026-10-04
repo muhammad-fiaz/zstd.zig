@@ -33,7 +33,7 @@ fn readBlockHeader(src: []const u8) errors.ZstdError!BlockHeader {
     if (src.len < block_header_size) return error.SrcSizeWrong;
     const flags = src[0];
     const size: usize = @as(usize, src[2]) | (@as(usize, src[1]) << 8) | (@as(usize, flags & 7) << 16);
-    const block_type: BlockType = @fromBackingInt(@intCast(@as(u2, @intCast(flags >> 6))));
+    const block_type: BlockType = @fromBackingInt(@intCast(@as(u2, @truncate(flags >> 6))));
     return .{
         .block_type = block_type,
         .size = switch (block_type) {

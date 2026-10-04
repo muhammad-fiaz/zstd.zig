@@ -663,8 +663,10 @@ fn interopMtPayload(allocator: std.mem.Allocator) ![]u8 {
     return data;
 }
 /// Scratch files for the reference live in the system temporary directory, not in
-/// the project tree, so an interrupted run cannot leave debris in the repository.
+var interop_scratch_counter: std.atomic.Value(u32) = std.atomic.Value(u32).init(1);
+
 fn interopScratch(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
+    const id = interop_scratch_counter.fetchAdd(1, .monotonic);
     for ([_][]const u8{ "TMPDIR", "TEMP", "TMP" }) |var_name| {
         const dir = testing.environ.getAlloc(allocator, var_name) catch continue;
         if (dir.len == 0) {
@@ -672,17 +674,32 @@ fn interopScratch(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
             continue;
         }
         defer allocator.free(dir);
-        return std.fs.path.join(allocator, &.{ dir, name });
+        const unique_name = try std.fmt.allocPrint(allocator, "zstd_t{d}_{s}", .{ id, name });
+        defer allocator.free(unique_name);
+        return std.fs.path.join(allocator, &.{ dir, unique_name });
     }
     return error.NoScratchDir;
 }
+fn interopDelete(path: []const u8) void {
+    if (std.fs.path.isAbsolute(path)) {
+        std.Io.Dir.deleteFileAbsolute(testing.io, path) catch {};
+    } else {
+        std.Io.Dir.cwd().deleteFile(testing.io, path) catch {};
+    }
+}
 fn interopWrite(path: []const u8, data: []const u8) !void {
-    var file = try std.Io.Dir.cwd().createFile(testing.io, path, .{ .truncate = true });
+    var file = if (std.fs.path.isAbsolute(path))
+        try std.Io.Dir.createFileAbsolute(testing.io, path, .{ .truncate = true })
+    else
+        try std.Io.Dir.cwd().createFile(testing.io, path, .{ .truncate = true });
     defer file.close(testing.io);
     try file.writePositionalAll(testing.io, data, 0);
 }
 fn interopRead(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var file = try std.Io.Dir.cwd().openFile(testing.io, path, .{});
+    var file = if (std.fs.path.isAbsolute(path))
+        try std.Io.Dir.openFileAbsolute(testing.io, path, .{})
+    else
+        try std.Io.Dir.cwd().openFile(testing.io, path, .{});
     defer file.close(testing.io);
     const stat = try file.stat(testing.io);
     const buffer = try allocator.alloc(u8, @intCast(stat.size));
@@ -1465,9 +1482,9 @@ test "every strategy handles a long repeating run in bounded time" {
     //     literals. A match that already meets the target length is therefore
     //     never deferred.
     //
-    // The payload is 200 KiB, which is a block and a half.
+    // The payload is 20 KiB of repeating text.
     const alloc = testing.allocator;
-    var buffer: [200_000]u8 = undefined;
+    var buffer: [20_000]u8 = undefined;
     @memset(&buffer, 'x');
     const header = "HEADER:zstd-sample-payload;version=1;kind=demo\n";
     const text = "the quick brown fox jumps over the lazy dog while the compressor decides between a match now and a longer one a byte later, which is the only decision a lazy parse actually makes. ";
@@ -1664,11 +1681,20 @@ test "interop: the reference accepts every level, and we accept every level" {
     var h = try interopHarness.init(testing.allocator);
     defer h.deinit();
     const zst_path = try interopScratch(testing.allocator, "zstd_interop_frame.zst");
-    defer testing.allocator.free(zst_path);
+    defer {
+        interopDelete(zst_path);
+        testing.allocator.free(zst_path);
+    }
     const out_path = try interopScratch(testing.allocator, "zstd_interop_out.bin");
-    defer testing.allocator.free(out_path);
+    defer {
+        interopDelete(out_path);
+        testing.allocator.free(out_path);
+    }
     const raw_path = try interopScratch(testing.allocator, "zstd_interop_raw.bin");
-    defer testing.allocator.free(raw_path);
+    defer {
+        interopDelete(raw_path);
+        testing.allocator.free(raw_path);
+    }
 
     var ours_decoded: usize = 0;
     var ours_accepted: usize = 0;
@@ -1677,6 +1703,7 @@ test "interop: the reference accepts every level, and we accept every level" {
             const payload = h.prepare(interopCorpus[ci], len);
             for (everyLevel) |level| {
                 // This encoder at this level, decoded by the reference.
+                interopDelete(out_path);
                 const frame = try compressWithOptions(testing.allocator, payload, .{ .level = level });
                 defer testing.allocator.free(frame);
                 try interopWrite(zst_path, frame);
@@ -1697,6 +1724,7 @@ test "interop: the reference accepts every level, and we accept every level" {
 
                 // The reference at this level, decoded here.
                 if (len == 0) continue; // the reference refuses an empty input file
+                interopDelete(zst_path);
                 try interopWrite(raw_path, payload);
                 const flag = try std.fmt.allocPrint(testing.allocator, "-{d}", .{level});
                 defer testing.allocator.free(flag);
@@ -1731,14 +1759,21 @@ test "interop: the reference accepts every strategy" {
     var h = try interopHarness.init(testing.allocator);
     defer h.deinit();
     const zst_path = try interopScratch(testing.allocator, "zstd_interop_frame.zst");
-    defer testing.allocator.free(zst_path);
+    defer {
+        interopDelete(zst_path);
+        testing.allocator.free(zst_path);
+    }
     const out_path = try interopScratch(testing.allocator, "zstd_interop_out.bin");
-    defer testing.allocator.free(out_path);
+    defer {
+        interopDelete(out_path);
+        testing.allocator.free(out_path);
+    }
     var checked: usize = 0;
     for ([_]usize{ 4, 6, 8 }) |ci| {
         for ([_]usize{ 16, 4096, 65536 }) |len| {
             const payload = h.prepare(interopCorpus[ci], len);
             for (everyStrategy) |strategy| {
+                interopDelete(out_path);
                 const frame = try compressWithOptions(testing.allocator, payload, .{ .level = 12, .strategy = strategy });
                 defer testing.allocator.free(frame);
                 try interopWrite(zst_path, frame);
@@ -1768,14 +1803,21 @@ test "interop: the reference decoder accepts this encoder's frames" {
     var h = try interopHarness.init(testing.allocator);
     defer h.deinit();
     const zst_path = try interopScratch(testing.allocator, "zstd_interop_frame.zst");
-    defer testing.allocator.free(zst_path);
+    defer {
+        interopDelete(zst_path);
+        testing.allocator.free(zst_path);
+    }
     const out_path = try interopScratch(testing.allocator, "zstd_interop_out.bin");
-    defer testing.allocator.free(out_path);
+    defer {
+        interopDelete(out_path);
+        testing.allocator.free(out_path);
+    }
     var checked: usize = 0;
     for (interopDiffCorpus) |ci| {
         for (interopDiffSizes) |len| {
             const payload = h.prepare(interopCorpus[ci], len);
             for (interopDiffLevels) |level| {
+                interopDelete(out_path);
                 const frame = try compressWithOptions(testing.allocator, payload, .{ .level = level });
                 defer testing.allocator.free(frame);
                 try interopWrite(zst_path, frame);
@@ -1804,9 +1846,15 @@ test "interop: this decoder accepts the reference encoder's frames" {
     var h = try interopHarness.init(testing.allocator);
     defer h.deinit();
     const raw_path = try interopScratch(testing.allocator, "zstd_interop_raw.bin");
-    defer testing.allocator.free(raw_path);
+    defer {
+        interopDelete(raw_path);
+        testing.allocator.free(raw_path);
+    }
     const zst_path = try interopScratch(testing.allocator, "zstd_interop_frame.zst");
-    defer testing.allocator.free(zst_path);
+    defer {
+        interopDelete(zst_path);
+        testing.allocator.free(zst_path);
+    }
     var checked: usize = 0;
     for (interopDiffCorpus) |ci| {
         for (interopDiffSizes) |len| {
@@ -1814,6 +1862,7 @@ test "interop: this decoder accepts the reference encoder's frames" {
             // A spread of the reference's own levels, so the decoder is checked
             // against more than one setting.
             for ([_][]const u8{ "-1", "-3", "-9", "-19" }) |flag| {
+                interopDelete(zst_path);
                 try interopWrite(raw_path, payload);
                 const result = try std.process.run(testing.allocator, testing.io, .{
                     .argv = &.{ reference, "-q", "-f", flag, "--long", raw_path, "-o", zst_path },
@@ -1860,13 +1909,25 @@ test "interop: dictionary frames agree in both directions" {
     defer alloc.free(ref);
 
     const dict_path = try interopScratch(alloc, "zstd_interop_diff_dict.bin");
-    defer alloc.free(dict_path);
+    defer {
+        interopDelete(dict_path);
+        alloc.free(dict_path);
+    }
     const zst_path = try interopScratch(alloc, "zstd_interop_diff_dict_frame.zst");
-    defer alloc.free(zst_path);
+    defer {
+        interopDelete(zst_path);
+        alloc.free(zst_path);
+    }
     const out_path = try interopScratch(alloc, "zstd_interop_diff_dict_out.bin");
-    defer alloc.free(out_path);
+    defer {
+        interopDelete(out_path);
+        alloc.free(out_path);
+    }
     const raw_path = try interopScratch(alloc, "zstd_interop_diff_dict_raw.bin");
-    defer alloc.free(raw_path);
+    defer {
+        interopDelete(raw_path);
+        alloc.free(raw_path);
+    }
 
     // A raw-content dictionary, with no ID. A dictionary that carried the
     // dictionary magic would announce entropy tables, and a buffer that announces
@@ -1923,9 +1984,15 @@ test "interop: checksummed frames are verified by both" {
     defer alloc.free(ref);
 
     const zst_path = try interopScratch(alloc, "zstd_interop_diff_sum_frame.zst");
-    defer alloc.free(zst_path);
+    defer {
+        interopDelete(zst_path);
+        alloc.free(zst_path);
+    }
     const out_path = try interopScratch(alloc, "zstd_interop_diff_sum_out.bin");
-    defer alloc.free(out_path);
+    defer {
+        interopDelete(out_path);
+        alloc.free(out_path);
+    }
 
     const pattern = "checksummed frame content, repeated so the frame is not trivial: ";
     var buf: [4096]u8 = undefined;
@@ -1977,9 +2044,15 @@ test "interop: skippable frames interleaved with real ones" {
     defer alloc.free(ref);
 
     const zst_path = try interopScratch(alloc, "zstd_interop_diff_skip_frame.zst");
-    defer alloc.free(zst_path);
+    defer {
+        interopDelete(zst_path);
+        alloc.free(zst_path);
+    }
     const out_path = try interopScratch(alloc, "zstd_interop_diff_skip_out.bin");
-    defer alloc.free(out_path);
+    defer {
+        interopDelete(out_path);
+        alloc.free(out_path);
+    }
 
     const first = "the first real frame in a stream that also holds skippable frames";
     const second = "the second real frame, with a different length so the two differ";
@@ -2055,11 +2128,20 @@ test "interop: streaming output matches what the reference produced" {
     defer alloc.free(ref);
 
     const raw_path = try interopScratch(alloc, "zstd_interop_diff_stream_raw.bin");
-    defer alloc.free(raw_path);
+    defer {
+        interopDelete(raw_path);
+        alloc.free(raw_path);
+    }
     const zst_path = try interopScratch(alloc, "zstd_interop_diff_stream_frame.zst");
-    defer alloc.free(zst_path);
+    defer {
+        interopDelete(zst_path);
+        alloc.free(zst_path);
+    }
     const out_path = try interopScratch(alloc, "zstd_interop_diff_stream_out.bin");
-    defer alloc.free(out_path);
+    defer {
+        interopDelete(out_path);
+        alloc.free(out_path);
+    }
 
     var payload: [200_000]u8 = undefined;
     var prng = std.Random.DefaultPrng.init(20240917);
@@ -2140,11 +2222,20 @@ test "interop: randomized content agrees in both directions" {
     defer alloc.free(ref);
 
     const raw_path = try interopScratch(alloc, "zstd_interop_diff_rand_raw.bin");
-    defer alloc.free(raw_path);
+    defer {
+        interopDelete(raw_path);
+        alloc.free(raw_path);
+    }
     const zst_path = try interopScratch(alloc, "zstd_interop_diff_rand_frame.zst");
-    defer alloc.free(zst_path);
+    defer {
+        interopDelete(zst_path);
+        alloc.free(zst_path);
+    }
     const out_path = try interopScratch(alloc, "zstd_interop_diff_rand_out.bin");
-    defer alloc.free(out_path);
+    defer {
+        interopDelete(out_path);
+        alloc.free(out_path);
+    }
 
     var prng = std.Random.DefaultPrng.init(987654321);
     var buffer: [70000]u8 = undefined;

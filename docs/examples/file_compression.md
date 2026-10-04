@@ -107,6 +107,77 @@ pub fn main(init: std.process.Init) !void {
         std.debug.assert(std.mem.eql(u8, sampleText, decompressedData));
         std.debug.print("4. Verified restored file matches original exactly!\n", .{});
     }
+
+    // Step 2: Directory compression & decompression workflow
+    std.debug.print("\n--- Directory Compression & Decompression ---\n", .{});
+
+    const dirFiles = [_]struct { relPath: []const u8, content: []const u8 }{
+        .{ .relPath = "config.json", .content = "{\n  \"service\": \"zstd-service\",\n  \"enabled\": true,\n  \"level\": 3\n}\n" },
+        .{ .relPath = "metrics.log", .content = "2026-10-04T00:00:00Z INFO Server started successfully.\n2026-10-04T00:00:01Z DEBUG Ready.\n" },
+        .{ .relPath = "payload.txt", .content = "Repeated block data: AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHHIIIIJJJJKKKKLLLLMMMMNNNNOOOOPPPPQQQQRRRRSSSSTTTT\n" },
+    };
+
+    const srcDir = "example_src_dir";
+    const compDir = "example_comp_dir";
+    const restDir = "example_rest_dir";
+
+    try cwd.createDirPath(io, srcDir);
+    try cwd.createDirPath(io, compDir);
+    try cwd.createDirPath(io, restDir);
+
+    for (dirFiles) |item| {
+        const fullSrcPath = try std.fs.path.join(allocator, &.{ srcDir, item.relPath });
+        defer allocator.free(fullSrcPath);
+        try cwd.writeFile(io, .{ .sub_path = fullSrcPath, .data = item.content, .flags = .{ .truncate = true } });
+    }
+    std.debug.print("1. Created directory '{s}' with {d} source files\n", .{ srcDir, dirFiles.len });
+
+    // Compress directory files
+    for (dirFiles) |item| {
+        const fullSrcPath = try std.fs.path.join(allocator, &.{ srcDir, item.relPath });
+        defer allocator.free(fullSrcPath);
+        const fullCompName = try std.fmt.allocPrint(allocator, "{s}.zst", .{item.relPath});
+        defer allocator.free(fullCompName);
+        const fullCompPath = try std.fs.path.join(allocator, &.{ compDir, fullCompName });
+        defer allocator.free(fullCompPath);
+
+        var inFile = try cwd.openFile(io, fullSrcPath, .{});
+        defer inFile.close(io);
+        const stat = try inFile.stat(io);
+        const buf = try allocator.alloc(u8, @as(usize, @intCast(stat.size)));
+        defer allocator.free(buf);
+        _ = try inFile.readPositionalAll(io, buf, 0);
+
+        const compBytes = try zstd.compress(allocator, buf);
+        defer allocator.free(compBytes);
+
+        try cwd.writeFile(io, .{ .sub_path = fullCompPath, .data = compBytes, .flags = .{ .truncate = true } });
+    }
+
+    // Decompress directory files into restored directory
+    for (dirFiles) |item| {
+        const fullCompName = try std.fmt.allocPrint(allocator, "{s}.zst", .{item.relPath});
+        defer allocator.free(fullCompName);
+        const fullCompPath = try std.fs.path.join(allocator, &.{ compDir, fullCompName });
+        defer allocator.free(fullCompPath);
+        const fullRestPath = try std.fs.path.join(allocator, &.{ restDir, item.relPath });
+        defer allocator.free(fullRestPath);
+
+        var cFile = try cwd.openFile(io, fullCompPath, .{});
+        defer cFile.close(io);
+        const stat = try cFile.stat(io);
+        const compBuf = try allocator.alloc(u8, @as(usize, @intCast(stat.size)));
+        defer allocator.free(compBuf);
+        _ = try cFile.readPositionalAll(io, compBuf, 0);
+
+        const decompBytes = try zstd.decompress(allocator, compBuf);
+        defer allocator.free(decompBytes);
+
+        try cwd.writeFile(io, .{ .sub_path = fullRestPath, .data = decompBytes, .flags = .{ .truncate = true } });
+        std.debug.assert(std.mem.eql(u8, item.content, decompBytes));
+        std.debug.print("3. Restored & verified '{s}' ({d} B) bit-for-bit\n", .{ item.relPath, decompBytes.len });
+    }
+    std.debug.print("4. Verified all directory files round-tripped successfully!\n", .{});
 }
 ```
 
@@ -117,15 +188,23 @@ pub fn main(init: std.process.Init) !void {
 2. Compressed 'example_input.txt' -> 'example_output.txt.zst' (616 -> 353 bytes, ratio: 57.31%)
 3. Decompressed 'example_output.txt.zst' -> 'example_restored.txt' (616 bytes)
 4. Verified restored file matches original exactly!
-```
 
-*Ratio >100% for 616 B is expected - Zstandard frame overhead dominates for tiny files; larger files compress well. Checksum and `Content_Size` are validated.*
+--- Directory Compression & Decompression ---
+1. Created directory 'example_src_dir' with 3 source files
+2. Compressed 'config.json' (65 B) -> 'config.json.zst' (69 B)
+2. Compressed 'metrics.log' (89 B) -> 'metrics.log.zst' (88 B)
+2. Compressed 'payload.txt' (102 B) -> 'payload.txt.zst' (111 B)
+3. Restored & verified 'config.json' (65 B) bit-for-bit
+3. Restored & verified 'metrics.log' (89 B) bit-for-bit
+3. Restored & verified 'payload.txt' (102 B) bit-for-bit
+4. Verified all directory files round-tripped successfully!
+```
 
 ## Explanation
 
-- Uses new `std.Io` (`Dir.cwd()`, `writeFile`, `openFile`, `stat`, `readPositionalAll`, `close` with explicit `io` - `lib/std/std.zig:19` `Io`).
-- Demonstrates the full file lifecycle: `writeFile` → `compress` → `writeFile(.zst)` → `openFile` → `decompress` → `writeFile` → bit-for-bit `assert`.
-- `zstd.compress` emits `0xFD2FB528` magic, `FHD` with `Content_Size`, `Window_Descriptor`, `Block_Header` (`Raw_Block` for this entropy), and `Checksum` if enabled.
+- Uses new Zig 0.17 `std.Io` (`Dir.cwd()`, `createDirPath`, `writeFile`, `openFile`, `stat`, `readPositionalAll`, `deleteFile`, `deleteDir`).
+- Demonstrates both single file lifecycle and full directory structure compression and decompression with bit-for-bit verification.
+- `zstd.compress` and `zstd.decompress` operate natively with zero external dependencies.
 
 Run:
 

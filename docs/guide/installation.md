@@ -16,12 +16,12 @@ description: How to install and set up zstd.zig in your Zig project.
 - Supported architectures: x86_64, aarch64, x86
 
 ::: warning Version Requirement
-This library requires **Zig 0.17.0** as declared in `build.zig.zon` (`minimum_zig_version = "0.17.0"`). Older versions are not supported. If you are still on Zig 0.16, use library version **0.0.3** (the previous stable) instead.
+This library targets the new **Zig 0.17.0** release and standard library APIs (`std.Io`, language builtins, etc.). **Zig 0.16.0 is not supported** in this release (`v0.0.4+`). If your project is still on Zig 0.16.0, please use library version **0.0.3** (the previous stable release).
 :::
 
 ## Setup
 
-### Method 1: Zig Fetch (Recommended) - Latest Release
+### Method 1: Zig Fetch (Recommended) - Latest Release (Zig 0.17.0)
 
 ```bash
 zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.4.tar.gz
@@ -38,7 +38,7 @@ This corresponds to `build.zig.zon` version `0.0.4`:
 }
 ```
 
-> **On Zig 0.16?** Fetch the previous stable instead:
+> **On Zig 0.16?** Zig 0.16.0 is not supported in `v0.0.4+`. Fetch the previous stable release instead:
 >
 > ```bash
 > zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.3.tar.gz
@@ -130,17 +130,12 @@ defer allocator.free(d);
 ```bash
 zig build                    # Build library
 zig build test --summary all # Run all tests
-zig build run-all-examples   # Run all 18 examples
-zig build stress             # Concurrency stress: pool waves, parallel compressors
-zig build fuzz               # Fuzz targets: mutated frames, round trips, legacy frames
-zig build bench -- --quick   # Throughput matrix; no flag runs the full one
+zig build run-all-examples   # Run all 19 examples
+zig build check              # Compile tests and examples without running
 ```
 
-`zig build test` needs a reference `zstd` binary, which it finds through
-`ZSTD_REFERENCE_PATH`, then `PATH`, then the usual install locations. If none is
-present the run fails rather than skipping the differential tests, so install one
-(`apt install zstd`, `brew install zstd`, `choco install zstd`) or point
-`ZSTD_REFERENCE_PATH` at it.
+`zig build test` verifies compatibility against reference `zstd` if available,
+found through `ZSTD_REFERENCE_PATH`, then `PATH`, then the usual install locations.
 
 If all tests pass, zstd.zig is properly installed.
 
