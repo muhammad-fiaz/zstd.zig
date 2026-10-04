@@ -290,6 +290,7 @@ The `examples/` directory contains complete, runnable examples:
 | `error_handling` | `examples/error_handling.zig` | Corruption, truncation, and buffer error cases |
 | `legacy_decompression` | `examples/legacy_decompression.zig` | Historic frame detection for v01-v07 and skippable frames |
 | `file_compression` | `examples/file_compression.zig` | Real file compression, write to .zst archive, and decompression |
+| `explicit_io_streaming` | `examples/explicit_io_streaming.zig` | Chunked streaming file compression, decompression, and Encoder/Decoder contexts |
 | `large_file_compression` | `examples/large_file_compression.zig` | Multi-megabyte (4 MiB) compression, ratio inspection, and disk preservation |
 
 Run any example:
@@ -297,8 +298,9 @@ Run any example:
 ```bash
 zig build run-basic_compression
 zig build run-streaming_compression
+zig build run-explicit_io_streaming
 zig build run-large_file_compression
-zig build run-all-examples   # Run all 19 examples
+zig build run-all-examples   # Run all 20 examples
 ```
 
 ---
@@ -309,7 +311,7 @@ zig build run-all-examples   # Run all 19 examples
 zig build                    # Build native Zstandard library
 zig build test               # Run all unit and interoperability tests
 zig build test --summary all # Detailed test execution summary
-zig build run-all-examples   # Run all 19 example executables
+zig build run-all-examples   # Run all 20 example executables
 zig build check              # Compile tests and examples without running
 zig build docs               # Generate documentation in zig-out/docs/
 ```

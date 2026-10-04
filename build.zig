@@ -64,6 +64,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "prepared_dictionary", .file = "examples/prepared_dictionary.zig" },
         .{ .name = "window_limit", .file = "examples/window_limit.zig" },
         .{ .name = "file_compression", .file = "examples/file_compression.zig" },
+        .{ .name = "explicit_io_streaming", .file = "examples/explicit_io_streaming.zig" },
         .{ .name = "large_file_compression", .file = "examples/large_file_compression.zig" },
         .{ .name = "custom_strategy", .file = "examples/custom_strategy.zig" },
         .{ .name = "long_distance_matching", .file = "examples/long_distance_matching.zig" },

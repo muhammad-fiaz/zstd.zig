@@ -51,6 +51,7 @@ zig build run-custom_strategy
 zig build run-custom_allocator
 zig build run-error_handling
 zig build run-file_compression
+zig build run-explicit_io_streaming
 zig build run-large_file_compression
 zig build run-parallel_compression
 zig build run-window_limit
@@ -66,7 +67,7 @@ zig build run-legacy_decompression
 ```
 
 Each example's step is named `run-<example file name>`. `zig build run-all-examples`
-runs all 19 of them, and `zig build check` compiles them for another target without
+runs all 20 of them, and `zig build check` compiles them for another target without
 running, which is what CI uses for cross-compilation.
 
 ## Code Style

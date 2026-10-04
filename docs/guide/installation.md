@@ -130,7 +130,7 @@ defer allocator.free(d);
 ```bash
 zig build                    # Build library
 zig build test --summary all # Run all tests
-zig build run-all-examples   # Run all 19 examples
+zig build run-all-examples   # Run all 20 examples
 zig build check              # Compile tests and examples without running
 ```
 
