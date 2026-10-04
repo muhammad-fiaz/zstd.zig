@@ -197,7 +197,7 @@ pub fn readSkippableFrameSize(src: []const u8) errors.ZstdError!usize {
     if (src.len < 8) return error.SrcSizeWrong;
     const size = bits.readLe32(src[4..8]);
     const total = std.math.add(usize, size, constants.skippable_header_size) catch
-        return error.FrameParameterUnsupported;
+        return error.SrcSizeWrong;
     if (total > src.len) return error.SrcSizeWrong;
     return total;
 }

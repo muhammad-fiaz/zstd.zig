@@ -51,7 +51,13 @@ jobs:
         run: brew install zstd
       - name: Install the reference zstd (Windows)
         if: matrix.os == 'windows-latest'
-        run: choco install zstd -y --no-progress
+        shell: bash
+        run: |
+          if [ -f "C:/Program Files/Git/usr/bin/zstd.exe" ]; then
+            echo "C:/Program Files/Git/usr/bin" >> $GITHUB_PATH
+          elif ! command -v zstd &> /dev/null; then
+            choco install zstandard -y --no-progress
+          fi
       - name: Build
         run: zig build -Dtarget=${{ matrix.arch }}-${{ fromJSON('{"ubuntu-latest":"linux","windows-latest":"windows","macos-latest":"macos"}')[matrix.os] }}
       - name: Check (compile tests and examples)

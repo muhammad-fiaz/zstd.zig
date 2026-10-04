@@ -678,7 +678,10 @@ fn interopScratch(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
         defer allocator.free(unique_name);
         return std.fs.path.join(allocator, &.{ dir, unique_name });
     }
-    return error.NoScratchDir;
+    const fallback_dir: []const u8 = if (builtin.os.tag == .windows) "." else "/tmp";
+    const unique_name = try std.fmt.allocPrint(allocator, "zstd_t{d}_{s}", .{ id, name });
+    defer allocator.free(unique_name);
+    return std.fs.path.join(allocator, &.{ fallback_dir, unique_name });
 }
 fn interopDelete(path: []const u8) void {
     if (std.fs.path.isAbsolute(path)) {
