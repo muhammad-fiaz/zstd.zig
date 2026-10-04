@@ -877,8 +877,8 @@ fn parseLazy(
         // multithreaded job holds only its prefix, which is why reach is
         // checked here instead of assumed.
         if (long_matches) |list| {
-            while (ldm_index < list.len and list[ldm_index].pos < pos) ldm_index += 1;
-            if (ldm_index < list.len and list[ldm_index].pos == pos) {
+            while (ldm_index < list.len and start + list[ldm_index].pos < pos) ldm_index += 1;
+            if (ldm_index < list.len and start + list[ldm_index].pos == pos) {
                 const long = list[ldm_index];
                 if (long.offset <= pos) {
                     const clamped: u32 = @intCast(@min(@as(usize, long.length), max_len));
@@ -1049,12 +1049,13 @@ fn parseOptimal(
     // source would decode to bytes this parse never saw.
     if (long_matches) |list| {
         for (list) |long| {
-            if (long.pos >= best.len or long.length < 3) continue;
-            if (long.offset > long.pos) continue;
-            const clamped: u32 = @intCast(@min(@as(usize, long.length), src.len - long.pos));
+            const match_pos = start + long.pos;
+            if (match_pos >= best.len or long.length < 3) continue;
+            if (long.offset > match_pos) continue;
+            const clamped: u32 = @intCast(@min(@as(usize, long.length), src.len - match_pos));
             const candidate = Match{ .length = clamped, .offset = long.offset };
             if (candidate.offset > max_offset) continue;
-            if (candidate.length > best[long.pos].length) best[long.pos] = candidate;
+            if (candidate.length > best[match_pos].length) best[match_pos] = candidate;
         }
     }
 
