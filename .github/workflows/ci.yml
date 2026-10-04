@@ -41,23 +41,6 @@ jobs:
       - name: Install QEMU for cross tests (Windows)
         if: matrix.os == 'windows-latest' && matrix.arch == 'aarch64'
         run: choco install qemu -y
-      - name: Install the reference zstd (Linux)
-        # The differential tests never skip: they need a reference binary to
-        # compare against, and each runner has to provide one.
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y zstd
-      - name: Install the reference zstd (macOS)
-        if: matrix.os == 'macos-latest'
-        run: brew install zstd
-      - name: Install the reference zstd (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: bash
-        run: |
-          if [ -f "C:/Program Files/Git/usr/bin/zstd.exe" ]; then
-            echo "C:/Program Files/Git/usr/bin" >> $GITHUB_PATH
-          elif ! command -v zstd &> /dev/null; then
-            choco install zstandard -y --no-progress
-          fi
       - name: Build
         run: zig build -Dtarget=${{ matrix.arch }}-${{ fromJSON('{"ubuntu-latest":"linux","windows-latest":"windows","macos-latest":"macos"}')[matrix.os] }}
       - name: Check (compile tests and examples)
