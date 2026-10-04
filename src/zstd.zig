@@ -1484,10 +1484,7 @@ test "every strategy handles a long repeating run in bounded time" {
     for ([_]Strategy{ .fast, .dfast, .greedy, .lazy, .lazy2, .btlazy2, .btopt, .btultra, .btultra2 }) |strategy| {
         const frame = try compressWithOptions(alloc, payload, .{ .level = 12, .strategy = strategy });
         defer alloc.free(frame);
-        const back = decompress(alloc, frame) catch |e| {
-            test_log.info("\nDECODE FAILED: {s}\n", .{@errorName(e)});
-            return;
-        };
+        const back = try decompress(alloc, frame);
         defer alloc.free(back);
         try testing.expectEqualSlices(u8, payload, back);
         // A parse that defers everywhere would leave a frame barely smaller than
@@ -1505,10 +1502,7 @@ test "roundtrip: high literal density blocks decode at every size" {
         for (data) |*b| b.* = random.intRangeAtMost(u8, 0, 63);
         const frame = try compressWithOptions(alloc, data, .{ .level = 9, .windowLog = 23 });
         defer alloc.free(frame);
-        const back = decompress(alloc, frame) catch |e| {
-            test_log.info("\nDECODE FAILED: {s}\n", .{@errorName(e)});
-            return;
-        };
+        const back = try decompress(alloc, frame);
         defer alloc.free(back);
         try testing.expectEqualSlices(u8, data, back);
     }
@@ -1658,218 +1652,294 @@ test "interop: every level and every strategy round trips over the corpus" {
 test "interop: the reference accepts every level, and we accept every level" {
     // Both directions for all 22 levels. The corpus is one of each kind that
     // behaves differently, and the sizes are small and block-sized.
-    const reference = interopReference() orelse return;
-    defer testing.allocator.free(reference);
     var h = try interopHarness.init(testing.allocator);
     defer h.deinit();
-    const zst_path = try interopScratch(testing.allocator, "zstd_interop_frame.zst");
-    defer {
-        interopDelete(zst_path);
-        testing.allocator.free(zst_path);
-    }
-    const out_path = try interopScratch(testing.allocator, "zstd_interop_out.bin");
-    defer {
-        interopDelete(out_path);
-        testing.allocator.free(out_path);
-    }
-    const raw_path = try interopScratch(testing.allocator, "zstd_interop_raw.bin");
-    defer {
-        interopDelete(raw_path);
-        testing.allocator.free(raw_path);
-    }
 
-    var ours_decoded: usize = 0;
-    var ours_accepted: usize = 0;
+    var native_checked: usize = 0;
     for ([_]usize{ 0, 4, 5, 6, 8 }) |ci| {
         for ([_]usize{ 16, 4096 }) |len| {
             const payload = h.prepare(interopCorpus[ci], len);
             for (everyLevel) |level| {
-                // This encoder at this level, decoded by the reference.
-                interopDelete(out_path);
                 const frame = try compressWithOptions(testing.allocator, payload, .{ .level = level });
-                defer testing.allocator.free(frame);
-                try interopWrite(zst_path, frame);
-                const decoded = try std.process.run(testing.allocator, testing.io, .{
-                    .argv = &.{ reference, "-d", "-f", "-q", zst_path, "-o", out_path },
-                });
-                defer testing.allocator.free(decoded.stdout);
-                defer testing.allocator.free(decoded.stderr);
-                const code = interopExitCode(decoded.term) orelse return error.ReferenceFailed;
-                if (code != 0) {
-                    test_log.info("reference rejected level {d}: {s} len={d} stderr={s}\n", .{ level, interopCorpus[ci].name, len, decoded.stderr });
-                    return error.ReferenceRejected;
-                }
-                const back = try interopRead(testing.allocator, out_path);
-                defer testing.allocator.free(back);
-                try testing.expectEqualSlices(u8, payload, back);
-                ours_accepted += 1;
-
-                // The reference at this level, decoded here.
-                if (len == 0) continue; // the reference refuses an empty input file
-                interopDelete(zst_path);
-                try interopWrite(raw_path, payload);
-                const flag = try std.fmt.allocPrint(testing.allocator, "-{d}", .{level});
-                defer testing.allocator.free(flag);
-                const encoded = try std.process.run(testing.allocator, testing.io, .{
-                    .argv = &.{ reference, "-q", "-f", flag, raw_path, "-o", zst_path },
-                });
-                defer testing.allocator.free(encoded.stdout);
-                defer testing.allocator.free(encoded.stderr);
-                const code2 = interopExitCode(encoded.term) orelse return error.ReferenceFailed;
-                if (code2 != 0) {
-                    test_log.info("reference compress failed at level {d}: {s} len={d} stderr={s}\n", .{ level, interopCorpus[ci].name, len, encoded.stderr });
-                    return error.ReferenceFailed;
-                }
-                const ref_frame = try interopRead(testing.allocator, zst_path);
-                defer testing.allocator.free(ref_frame);
-                const mine = try decompress(testing.allocator, ref_frame);
-                defer testing.allocator.free(mine);
-                try testing.expectEqualSlices(u8, payload, mine);
-                ours_decoded += 1;
-            }
-        }
-    }
-    test_log.info("interop: reference accepted {d} frames across every level; we decoded {d} reference frames\n", .{ ours_accepted, ours_decoded });
-    try testing.expectEqual(everyLevel.len * 5 * 2, ours_accepted);
-    try testing.expectEqual(ours_accepted, ours_decoded);
-}
-test "interop: the reference accepts every strategy" {
-    // Our strategies produce different frames for the same input; each has to be
-    // decodable by the reference, and the reference's own frames decodable here.
-    const reference = interopReference() orelse return;
-    defer testing.allocator.free(reference);
-    var h = try interopHarness.init(testing.allocator);
-    defer h.deinit();
-    const zst_path = try interopScratch(testing.allocator, "zstd_interop_frame.zst");
-    defer {
-        interopDelete(zst_path);
-        testing.allocator.free(zst_path);
-    }
-    const out_path = try interopScratch(testing.allocator, "zstd_interop_out.bin");
-    defer {
-        interopDelete(out_path);
-        testing.allocator.free(out_path);
-    }
-    var checked: usize = 0;
-    for ([_]usize{ 4, 6, 8 }) |ci| {
-        for ([_]usize{ 16, 4096, 65536 }) |len| {
-            const payload = h.prepare(interopCorpus[ci], len);
-            for (everyStrategy) |strategy| {
-                interopDelete(out_path);
-                const frame = try compressWithOptions(testing.allocator, payload, .{ .level = 12, .strategy = strategy });
-                defer testing.allocator.free(frame);
-                try interopWrite(zst_path, frame);
-                const result = try std.process.run(testing.allocator, testing.io, .{
-                    .argv = &.{ reference, "-d", "-f", "-q", zst_path, "-o", out_path },
-                });
-                defer testing.allocator.free(result.stdout);
-                defer testing.allocator.free(result.stderr);
-                const code = interopExitCode(result.term) orelse return error.ReferenceFailed;
-                if (code != 0) {
-                    test_log.info("reference rejected strategy {s}: {s} len={d} stderr={s}\n", .{ @tagName(strategy), interopCorpus[ci].name, len, result.stderr });
-                    return error.ReferenceRejected;
-                }
-                const back = try interopRead(testing.allocator, out_path);
-                defer testing.allocator.free(back);
-                try testing.expectEqualSlices(u8, payload, back);
-                checked += 1;
-            }
-        }
-    }
-    test_log.info("interop: reference accepted {d} frames across every strategy\n", .{checked});
-    try testing.expectEqual(3 * 3 * everyStrategy.len, checked);
-}
-test "interop: the reference decoder accepts this encoder's frames" {
-    const reference = interopReference() orelse return;
-    defer testing.allocator.free(reference);
-    var h = try interopHarness.init(testing.allocator);
-    defer h.deinit();
-    const zst_path = try interopScratch(testing.allocator, "zstd_interop_frame.zst");
-    defer {
-        interopDelete(zst_path);
-        testing.allocator.free(zst_path);
-    }
-    const out_path = try interopScratch(testing.allocator, "zstd_interop_out.bin");
-    defer {
-        interopDelete(out_path);
-        testing.allocator.free(out_path);
-    }
-    var checked: usize = 0;
-    for (interopDiffCorpus) |ci| {
-        for (interopDiffSizes) |len| {
-            const payload = h.prepare(interopCorpus[ci], len);
-            for (interopDiffLevels) |level| {
-                interopDelete(out_path);
-                const frame = try compressWithOptions(testing.allocator, payload, .{ .level = level });
-                defer testing.allocator.free(frame);
-                try interopWrite(zst_path, frame);
-                const result = try std.process.run(testing.allocator, testing.io, .{
-                    .argv = &.{ reference, "-d", "-f", "-q", zst_path, "-o", out_path },
-                });
-                defer testing.allocator.free(result.stdout);
-                defer testing.allocator.free(result.stderr);
-                const code = interopExitCode(result.term) orelse return error.ReferenceFailed;
-                if (code != 0) {
-                    test_log.info("reference rejected our frame: {s} len={d} level={d} stderr={s}\n", .{ interopCorpus[ci].name, len, level, result.stderr });
-                    return error.ReferenceRejected;
-                }
-                const decoded = try interopRead(testing.allocator, out_path);
-                defer testing.allocator.free(decoded);
-                try testing.expectEqualSlices(u8, payload, decoded);
-                checked += 1;
-            }
-        }
-    }
-    test_log.info("reference decoded {d} of our frames\n", .{checked});
-}
-test "interop: this decoder accepts the reference encoder's frames" {
-    const reference = interopReference() orelse return;
-    defer testing.allocator.free(reference);
-    var h = try interopHarness.init(testing.allocator);
-    defer h.deinit();
-    const raw_path = try interopScratch(testing.allocator, "zstd_interop_raw.bin");
-    defer {
-        interopDelete(raw_path);
-        testing.allocator.free(raw_path);
-    }
-    const zst_path = try interopScratch(testing.allocator, "zstd_interop_frame.zst");
-    defer {
-        interopDelete(zst_path);
-        testing.allocator.free(zst_path);
-    }
-    var checked: usize = 0;
-    for (interopDiffCorpus) |ci| {
-        for (interopDiffSizes) |len| {
-            const payload = h.prepare(interopCorpus[ci], len);
-            // A spread of the reference's own levels, so the decoder is checked
-            // against more than one setting.
-            for ([_][]const u8{ "-1", "-3", "-9", "-19" }) |flag| {
-                interopDelete(zst_path);
-                try interopWrite(raw_path, payload);
-                const result = try std.process.run(testing.allocator, testing.io, .{
-                    .argv = &.{ reference, "-q", "-f", flag, "--long", raw_path, "-o", zst_path },
-                });
-                defer testing.allocator.free(result.stdout);
-                defer testing.allocator.free(result.stderr);
-                const code = interopExitCode(result.term) orelse return error.ReferenceFailed;
-                if (code != 0) {
-                    // An empty input is refused by the reference compressor and
-                    // says nothing about our decoder, so it is not counted as a
-                    // failure.
-                    if (len == 0) continue;
-                    test_log.info("reference compress exit {d}: {s} len={d} flag={s} stderr={s}\n", .{ code, interopCorpus[ci].name, len, flag, result.stderr });
-                    return error.ReferenceFailed;
-                }
-                const frame = try interopRead(testing.allocator, zst_path);
                 defer testing.allocator.free(frame);
                 const restored = try decompress(testing.allocator, frame);
                 defer testing.allocator.free(restored);
                 try testing.expectEqualSlices(u8, payload, restored);
-                checked += 1;
+                native_checked += 1;
             }
         }
     }
-    test_log.info("we decoded {d} reference frames\n", .{checked});
+    try testing.expectEqual(everyLevel.len * 5 * 2, native_checked);
+
+    if (interopReference()) |reference| {
+        defer testing.allocator.free(reference);
+        const zst_path = try interopScratch(testing.allocator, "zstd_interop_frame.zst");
+        defer {
+            interopDelete(zst_path);
+            testing.allocator.free(zst_path);
+        }
+        const out_path = try interopScratch(testing.allocator, "zstd_interop_out.bin");
+        defer {
+            interopDelete(out_path);
+            testing.allocator.free(out_path);
+        }
+        const raw_path = try interopScratch(testing.allocator, "zstd_interop_raw.bin");
+        defer {
+            interopDelete(raw_path);
+            testing.allocator.free(raw_path);
+        }
+
+        var ours_decoded: usize = 0;
+        var ours_accepted: usize = 0;
+        for ([_]usize{ 0, 4, 5, 6, 8 }) |ci| {
+            for ([_]usize{ 16, 4096 }) |len| {
+                const payload = h.prepare(interopCorpus[ci], len);
+                for (everyLevel) |level| {
+                    // This encoder at this level, decoded by the reference.
+                    interopDelete(out_path);
+                    const frame = try compressWithOptions(testing.allocator, payload, .{ .level = level });
+                    defer testing.allocator.free(frame);
+                    try interopWrite(zst_path, frame);
+                    const decoded = try std.process.run(testing.allocator, testing.io, .{
+                        .argv = &.{ reference, "-d", "-f", "-q", zst_path, "-o", out_path },
+                    });
+                    defer testing.allocator.free(decoded.stdout);
+                    defer testing.allocator.free(decoded.stderr);
+                    const code = interopExitCode(decoded.term) orelse return error.ReferenceFailed;
+                    if (code != 0) {
+                        test_log.info("reference rejected level {d}: {s} len={d} stderr={s}\n", .{ level, interopCorpus[ci].name, len, decoded.stderr });
+                        return error.ReferenceRejected;
+                    }
+                    const back = try interopRead(testing.allocator, out_path);
+                    defer testing.allocator.free(back);
+                    try testing.expectEqualSlices(u8, payload, back);
+                    ours_accepted += 1;
+
+                    // The reference at this level, decoded here.
+                    if (len == 0) continue; // the reference refuses an empty input file
+                    interopDelete(zst_path);
+                    try interopWrite(raw_path, payload);
+                    const flag = try std.fmt.allocPrint(testing.allocator, "-{d}", .{level});
+                    defer testing.allocator.free(flag);
+                    const encoded = try std.process.run(testing.allocator, testing.io, .{
+                        .argv = &.{ reference, "-q", "-f", flag, raw_path, "-o", zst_path },
+                    });
+                    defer testing.allocator.free(encoded.stdout);
+                    defer testing.allocator.free(encoded.stderr);
+                    const code2 = interopExitCode(encoded.term) orelse return error.ReferenceFailed;
+                    if (code2 != 0) {
+                        test_log.info("reference compress failed at level {d}: {s} len={d} stderr={s}\n", .{ level, interopCorpus[ci].name, len, encoded.stderr });
+                        return error.ReferenceFailed;
+                    }
+                    const ref_frame = try interopRead(testing.allocator, zst_path);
+                    defer testing.allocator.free(ref_frame);
+                    const mine = try decompress(testing.allocator, ref_frame);
+                    defer testing.allocator.free(mine);
+                    try testing.expectEqualSlices(u8, payload, mine);
+                    ours_decoded += 1;
+                }
+            }
+        }
+        test_log.info("interop: reference accepted {d} frames across every level; we decoded {d} reference frames\n", .{ ours_accepted, ours_decoded });
+        try testing.expectEqual(everyLevel.len * 5 * 2, ours_accepted);
+        try testing.expectEqual(ours_accepted, ours_decoded);
+    }
+}
+test "interop: the reference accepts every strategy" {
+    // Our strategies produce different frames for the same input; each has to be
+    // decodable by the reference, and the reference's own frames decodable here.
+    var h = try interopHarness.init(testing.allocator);
+    defer h.deinit();
+
+    var native_checked: usize = 0;
+    for ([_]usize{ 4, 6, 8 }) |ci| {
+        for ([_]usize{ 16, 4096, 65536 }) |len| {
+            const payload = h.prepare(interopCorpus[ci], len);
+            for (everyStrategy) |strategy| {
+                const frame = try compressWithOptions(testing.allocator, payload, .{ .level = 12, .strategy = strategy });
+                defer testing.allocator.free(frame);
+                const restored = try decompress(testing.allocator, frame);
+                defer testing.allocator.free(restored);
+                try testing.expectEqualSlices(u8, payload, restored);
+                native_checked += 1;
+            }
+        }
+    }
+    try testing.expectEqual(3 * 3 * everyStrategy.len, native_checked);
+
+    if (interopReference()) |reference| {
+        defer testing.allocator.free(reference);
+        const zst_path = try interopScratch(testing.allocator, "zstd_interop_frame.zst");
+        defer {
+            interopDelete(zst_path);
+            testing.allocator.free(zst_path);
+        }
+        const out_path = try interopScratch(testing.allocator, "zstd_interop_out.bin");
+        defer {
+            interopDelete(out_path);
+            testing.allocator.free(out_path);
+        }
+        var checked: usize = 0;
+        for ([_]usize{ 4, 6, 8 }) |ci| {
+            for ([_]usize{ 16, 4096, 65536 }) |len| {
+                const payload = h.prepare(interopCorpus[ci], len);
+                for (everyStrategy) |strategy| {
+                    interopDelete(out_path);
+                    const frame = try compressWithOptions(testing.allocator, payload, .{ .level = 12, .strategy = strategy });
+                    defer testing.allocator.free(frame);
+                    try interopWrite(zst_path, frame);
+                    const result = try std.process.run(testing.allocator, testing.io, .{
+                        .argv = &.{ reference, "-d", "-f", "-q", zst_path, "-o", out_path },
+                    });
+                    defer testing.allocator.free(result.stdout);
+                    defer testing.allocator.free(result.stderr);
+                    const code = interopExitCode(result.term) orelse return error.ReferenceFailed;
+                    if (code != 0) {
+                        test_log.info("reference rejected strategy {s}: {s} len={d} stderr={s}\n", .{ @tagName(strategy), interopCorpus[ci].name, len, result.stderr });
+                        return error.ReferenceRejected;
+                    }
+                    const back = try interopRead(testing.allocator, out_path);
+                    defer testing.allocator.free(back);
+                    try testing.expectEqualSlices(u8, payload, back);
+                    checked += 1;
+                }
+            }
+        }
+        test_log.info("interop: reference accepted {d} frames across every strategy\n", .{checked});
+        try testing.expectEqual(3 * 3 * everyStrategy.len, checked);
+    }
+}
+test "interop: the reference decoder accepts this encoder's frames" {
+    var h = try interopHarness.init(testing.allocator);
+    defer h.deinit();
+
+    var native_checked: usize = 0;
+    for (interopDiffCorpus) |ci| {
+        for (interopDiffSizes) |len| {
+            const payload = h.prepare(interopCorpus[ci], len);
+            for (interopDiffLevels) |level| {
+                const frame = try compressWithOptions(testing.allocator, payload, .{ .level = level });
+                defer testing.allocator.free(frame);
+                const restored = try decompress(testing.allocator, frame);
+                defer testing.allocator.free(restored);
+                try testing.expectEqualSlices(u8, payload, restored);
+                native_checked += 1;
+            }
+        }
+    }
+    try testing.expectEqual(interopDiffCorpus.len * interopDiffSizes.len * interopDiffLevels.len, native_checked);
+
+    if (interopReference()) |reference| {
+        defer testing.allocator.free(reference);
+        const zst_path = try interopScratch(testing.allocator, "zstd_interop_frame.zst");
+        defer {
+            interopDelete(zst_path);
+            testing.allocator.free(zst_path);
+        }
+        const out_path = try interopScratch(testing.allocator, "zstd_interop_out.bin");
+        defer {
+            interopDelete(out_path);
+            testing.allocator.free(out_path);
+        }
+        var checked: usize = 0;
+        for (interopDiffCorpus) |ci| {
+            for (interopDiffSizes) |len| {
+                const payload = h.prepare(interopCorpus[ci], len);
+                for (interopDiffLevels) |level| {
+                    interopDelete(out_path);
+                    const frame = try compressWithOptions(testing.allocator, payload, .{ .level = level });
+                    defer testing.allocator.free(frame);
+                    try interopWrite(zst_path, frame);
+                    const result = try std.process.run(testing.allocator, testing.io, .{
+                        .argv = &.{ reference, "-d", "-f", "-q", zst_path, "-o", out_path },
+                    });
+                    defer testing.allocator.free(result.stdout);
+                    defer testing.allocator.free(result.stderr);
+                    const code = interopExitCode(result.term) orelse return error.ReferenceFailed;
+                    if (code != 0) {
+                        test_log.info("reference rejected our frame: {s} len={d} level={d} stderr={s}\n", .{ interopCorpus[ci].name, len, level, result.stderr });
+                        return error.ReferenceRejected;
+                    }
+                    const decoded = try interopRead(testing.allocator, out_path);
+                    defer testing.allocator.free(decoded);
+                    try testing.expectEqualSlices(u8, payload, decoded);
+                    checked += 1;
+                }
+            }
+        }
+        test_log.info("reference decoded {d} of our frames\n", .{checked});
+        try testing.expectEqual(interopDiffCorpus.len * interopDiffSizes.len * interopDiffLevels.len, checked);
+    }
+}
+test "interop: this decoder accepts the reference encoder's frames" {
+    var h = try interopHarness.init(testing.allocator);
+    defer h.deinit();
+
+    var native_checked: usize = 0;
+    for (interopDiffCorpus) |ci| {
+        for (interopDiffSizes) |len| {
+            const payload = h.prepare(interopCorpus[ci], len);
+            for ([_]i32{ 1, 3, 9, 19 }) |level| {
+                const frame = try compressWithOptions(testing.allocator, payload, .{
+                    .level = level,
+                    .windowLog = 22,
+                });
+                defer testing.allocator.free(frame);
+                const restored = try decompress(testing.allocator, frame);
+                defer testing.allocator.free(restored);
+                try testing.expectEqualSlices(u8, payload, restored);
+                native_checked += 1;
+            }
+        }
+    }
+    try testing.expectEqual(interopDiffCorpus.len * interopDiffSizes.len * 4, native_checked);
+
+    if (interopReference()) |reference| {
+        defer testing.allocator.free(reference);
+        const raw_path = try interopScratch(testing.allocator, "zstd_interop_raw.bin");
+        defer {
+            interopDelete(raw_path);
+            testing.allocator.free(raw_path);
+        }
+        const zst_path = try interopScratch(testing.allocator, "zstd_interop_frame.zst");
+        defer {
+            interopDelete(zst_path);
+            testing.allocator.free(zst_path);
+        }
+        var checked: usize = 0;
+        for (interopDiffCorpus) |ci| {
+            for (interopDiffSizes) |len| {
+                const payload = h.prepare(interopCorpus[ci], len);
+                // A spread of the reference's own levels, so the decoder is checked
+                // against more than one setting.
+                for ([_][]const u8{ "-1", "-3", "-9", "-19" }) |flag| {
+                    interopDelete(zst_path);
+                    try interopWrite(raw_path, payload);
+                    const result = try std.process.run(testing.allocator, testing.io, .{
+                        .argv = &.{ reference, "-q", "-f", flag, "--long", raw_path, "-o", zst_path },
+                    });
+                    defer testing.allocator.free(result.stdout);
+                    defer testing.allocator.free(result.stderr);
+                    const code = interopExitCode(result.term) orelse return error.ReferenceFailed;
+                    if (code != 0) {
+                        // An empty input is refused by the reference compressor and
+                        // says nothing about our decoder, so it is not counted as a
+                        // failure.
+                        if (len == 0) continue;
+                        test_log.info("reference compress exit {d}: {s} len={d} flag={s} stderr={s}\n", .{ code, interopCorpus[ci].name, len, flag, result.stderr });
+                        return error.ReferenceFailed;
+                    }
+                    const frame = try interopRead(testing.allocator, zst_path);
+                    defer testing.allocator.free(frame);
+                    const restored = try decompress(testing.allocator, frame);
+                    defer testing.allocator.free(restored);
+                    try testing.expectEqualSlices(u8, payload, restored);
+                    checked += 1;
+                }
+            }
+        }
+        test_log.info("we decoded {d} reference frames\n", .{checked});
+    }
 }
 // Differential interoperability on the parts of the format where a silent
 // disagreement is most likely
@@ -1887,29 +1957,6 @@ test "interop: dictionary frames agree in both directions" {
     // the decoder either resolves the dictionary matches or produces plausible
     // rubbish. Both directions are checked, and the bytes must be identical.
     const alloc = testing.allocator;
-    const ref = interopReference() orelse return;
-    defer alloc.free(ref);
-
-    const dict_path = try interopScratch(alloc, "zstd_interop_diff_dict.bin");
-    defer {
-        interopDelete(dict_path);
-        alloc.free(dict_path);
-    }
-    const zst_path = try interopScratch(alloc, "zstd_interop_diff_dict_frame.zst");
-    defer {
-        interopDelete(zst_path);
-        alloc.free(zst_path);
-    }
-    const out_path = try interopScratch(alloc, "zstd_interop_diff_dict_out.bin");
-    defer {
-        interopDelete(out_path);
-        alloc.free(out_path);
-    }
-    const raw_path = try interopScratch(alloc, "zstd_interop_diff_dict_raw.bin");
-    defer {
-        interopDelete(raw_path);
-        alloc.free(raw_path);
-    }
 
     // A raw-content dictionary, with no ID. A dictionary that carried the
     // dictionary magic would announce entropy tables, and a buffer that announces
@@ -1919,62 +1966,85 @@ test "interop: dictionary frames agree in both directions" {
     var dict = try loadDictionary(alloc, dict_content);
     defer dict.deinit();
     try testing.expectEqual(@as(u32, 0), dict.dictId());
-    try interopWrite(dict_path, dict.content());
 
     var payload: [8192]u8 = undefined;
     for (&payload, 0..) |*b, i| b.* = if (i % 3 == 0) 'x' else @intCast(i & 0xFF);
     @memcpy(payload[0..dict_content.len], dict_content);
-    try interopWrite(raw_path, &payload);
 
-    // Our frame, read by the reference.
+    // Native dictionary compression and decompression verification
     const ours = try compressWithOptions(alloc, &payload, .{ .level = 9, .dictionary = &dict });
     defer alloc.free(ours);
-    try interopWrite(zst_path, ours);
 
-    const check = try interopRun(alloc, &.{ ref, "-d", "-f", "-q", "-D", dict_path, zst_path, "-o", out_path });
-    defer alloc.free(check.stderr);
-    if (check.code != 0) {
-        test_log.info("reference rejected our dictionary frame: {s}\n", .{check.stderr});
-        return error.ReferenceRejected;
-    }
-    const back = try interopRead(alloc, out_path);
-    defer alloc.free(back);
-    try testing.expectEqualSlices(u8, &payload, back);
-
-    // The reference's frame, read here.
-    const produced = try interopRun(alloc, &.{ ref, "-19", "-f", "-q", "-D", dict_path, raw_path, "-o", zst_path });
-    defer alloc.free(produced.stderr);
-    if (produced.code != 0) return error.ReferenceFailed;
-
-    const their_frame = try interopRead(alloc, zst_path);
-    defer alloc.free(their_frame);
     var ctx = DecompressionContext.init(alloc);
     defer ctx.deinit();
     ctx.setDictionary(&dict);
-    const our_decoded = try ctx.decompressAlloc(their_frame);
+    const our_decoded = try ctx.decompressAlloc(ours);
     defer alloc.free(our_decoded);
     try testing.expectEqualSlices(u8, &payload, our_decoded);
 
-    test_log.info("interop: dictionary frames agreed in both directions\n", .{});
+    const direct_decoded = try decompressWithOptions(alloc, ours, .{ .dictionary = &dict });
+    defer alloc.free(direct_decoded);
+    try testing.expectEqualSlices(u8, &payload, direct_decoded);
+
+    if (interopReference()) |ref| {
+        defer alloc.free(ref);
+        const dict_path = try interopScratch(alloc, "zstd_interop_diff_dict.bin");
+        defer {
+            interopDelete(dict_path);
+            alloc.free(dict_path);
+        }
+        const zst_path = try interopScratch(alloc, "zstd_interop_diff_dict_frame.zst");
+        defer {
+            interopDelete(zst_path);
+            alloc.free(zst_path);
+        }
+        const out_path = try interopScratch(alloc, "zstd_interop_diff_dict_out.bin");
+        defer {
+            interopDelete(out_path);
+            alloc.free(out_path);
+        }
+        const raw_path = try interopScratch(alloc, "zstd_interop_diff_dict_raw.bin");
+        defer {
+            interopDelete(raw_path);
+            alloc.free(raw_path);
+        }
+
+        try interopWrite(dict_path, dict.content());
+        try interopWrite(raw_path, &payload);
+        try interopWrite(zst_path, ours);
+
+        const check = try interopRun(alloc, &.{ ref, "-d", "-f", "-q", "-D", dict_path, zst_path, "-o", out_path });
+        defer alloc.free(check.stderr);
+        if (check.code != 0) {
+            test_log.info("reference rejected our dictionary frame: {s}\n", .{check.stderr});
+            return error.ReferenceRejected;
+        }
+        const back = try interopRead(alloc, out_path);
+        defer alloc.free(back);
+        try testing.expectEqualSlices(u8, &payload, back);
+
+        // The reference's frame, read here.
+        const produced = try interopRun(alloc, &.{ ref, "-19", "-f", "-q", "-D", dict_path, raw_path, "-o", zst_path });
+        defer alloc.free(produced.stderr);
+        if (produced.code != 0) return error.ReferenceFailed;
+
+        const their_frame = try interopRead(alloc, zst_path);
+        defer alloc.free(their_frame);
+        var ref_ctx = DecompressionContext.init(alloc);
+        defer ref_ctx.deinit();
+        ref_ctx.setDictionary(&dict);
+        const ref_decoded = try ref_ctx.decompressAlloc(their_frame);
+        defer alloc.free(ref_decoded);
+        try testing.expectEqualSlices(u8, &payload, ref_decoded);
+
+        test_log.info("interop: dictionary frames agreed in both directions\n", .{});
+    }
 }
 test "interop: checksummed frames are verified by both" {
     // A frame with a checksum that has been tampered with must be rejected by
     // both implementations, and an intact one accepted by both. Otherwise a
     // corrupt payload would pass silently on one side.
     const alloc = testing.allocator;
-    const ref = interopReference() orelse return;
-    defer alloc.free(ref);
-
-    const zst_path = try interopScratch(alloc, "zstd_interop_diff_sum_frame.zst");
-    defer {
-        interopDelete(zst_path);
-        alloc.free(zst_path);
-    }
-    const out_path = try interopScratch(alloc, "zstd_interop_diff_sum_out.bin");
-    defer {
-        interopDelete(out_path);
-        alloc.free(out_path);
-    }
 
     const pattern = "checksummed frame content, repeated so the frame is not trivial: ";
     var buf: [4096]u8 = undefined;
@@ -1983,21 +2053,10 @@ test "interop: checksummed frames are verified by both" {
     const ours = try compressWithOptions(alloc, buf[0..], .{ .level = 3, .checksum = true });
     defer alloc.free(ours);
 
-    // Intact: the reference accepts it and we read it back.
-    try interopWrite(zst_path, ours);
-    const check = try interopRun(alloc, &.{ ref, "-d", "-f", "-q", zst_path, "-o", out_path });
-    defer alloc.free(check.stderr);
-    if (check.code != 0) return error.ReferenceRejected;
-    {
-        const back = try interopRead(alloc, out_path);
-        defer alloc.free(back);
-        try testing.expectEqualSlices(u8, buf[0..], back);
-    }
-    {
-        const back = try decompress(alloc, ours);
-        defer alloc.free(back);
-        try testing.expectEqualSlices(u8, buf[0..], back);
-    }
+    // Intact: decompress and verify payload matches
+    const intact_back = try decompress(alloc, ours);
+    defer alloc.free(intact_back);
+    try testing.expectEqualSlices(u8, buf[0..], intact_back);
 
     // Tampered: flip a byte in the payload region, which invalidates the digest.
     var broken = try alloc.dupe(u8, ours);
@@ -2011,30 +2070,39 @@ test "interop: checksummed frames are verified by both" {
         return error.CorruptFrameAccepted;
     } else |_| {}
 
-    try interopWrite(zst_path, broken);
-    const their_result = try interopRun(alloc, &.{ ref, "-d", "-f", "-q", zst_path, "-o", out_path });
-    defer alloc.free(their_result.stderr);
-    if (their_result.code == 0) return error.CorruptFrameAcceptedByReference;
+    if (interopReference()) |ref| {
+        defer alloc.free(ref);
+        const zst_path = try interopScratch(alloc, "zstd_interop_diff_sum_frame.zst");
+        defer {
+            interopDelete(zst_path);
+            alloc.free(zst_path);
+        }
+        const out_path = try interopScratch(alloc, "zstd_interop_diff_sum_out.bin");
+        defer {
+            interopDelete(out_path);
+            alloc.free(out_path);
+        }
 
-    test_log.info("interop: checksummed frames accepted when intact, rejected when tampered\n", .{});
+        try interopWrite(zst_path, ours);
+        const check = try interopRun(alloc, &.{ ref, "-d", "-f", "-q", zst_path, "-o", out_path });
+        defer alloc.free(check.stderr);
+        if (check.code != 0) return error.ReferenceRejected;
+        const back = try interopRead(alloc, out_path);
+        defer alloc.free(back);
+        try testing.expectEqualSlices(u8, buf[0..], back);
+
+        try interopWrite(zst_path, broken);
+        const their_result = try interopRun(alloc, &.{ ref, "-d", "-f", "-q", zst_path, "-o", out_path });
+        defer alloc.free(their_result.stderr);
+        if (their_result.code == 0) return error.CorruptFrameAcceptedByReference;
+
+        test_log.info("interop: checksummed frames accepted when intact, rejected when tampered\n", .{});
+    }
 }
 test "interop: skippable frames interleaved with real ones" {
     // A skippable frame between real ones must be stepped over by the reference
     // and by us, and the real frames must still decode to their own content.
     const alloc = testing.allocator;
-    const ref = interopReference() orelse return;
-    defer alloc.free(ref);
-
-    const zst_path = try interopScratch(alloc, "zstd_interop_diff_skip_frame.zst");
-    defer {
-        interopDelete(zst_path);
-        alloc.free(zst_path);
-    }
-    const out_path = try interopScratch(alloc, "zstd_interop_diff_skip_out.bin");
-    defer {
-        interopDelete(out_path);
-        alloc.free(out_path);
-    }
 
     const first = "the first real frame in a stream that also holds skippable frames";
     const second = "the second real frame, with a different length so the two differ";
@@ -2055,28 +2123,7 @@ test "interop: skippable frames interleaved with real ones" {
         try stream.appendSlice(alloc, f);
     }
 
-    try interopWrite(zst_path, stream.items);
-
-    // The reference must skip the opaque frames and concatenate the content.
-    const check = try interopRun(alloc, &.{ ref, "-d", "-f", "-q", zst_path, "-o", out_path });
-    defer alloc.free(check.stderr);
-    if (check.code != 0) {
-        test_log.info("reference rejected our skippable stream: {s}\n", .{check.stderr});
-        return error.ReferenceRejected;
-    }
-    {
-        const back = try interopRead(alloc, out_path);
-        defer alloc.free(back);
-        var expected: std.ArrayList(u8) = .empty;
-        defer expected.deinit(alloc);
-        try expected.appendSlice(alloc, first);
-        try expected.appendSlice(alloc, second);
-        try testing.expectEqualSlices(u8, expected.items, back);
-    }
-
-    // And we must walk the same stream, frame by frame. The regular frames are
-    // identified separately from the skippable ones, so the two counts do not
-    // interfere.
+    // Native verification: walk the same stream, frame by frame.
     var count: usize = 0;
     var skippable: usize = 0;
     var regular: usize = 0;
@@ -2098,6 +2145,37 @@ test "interop: skippable frames interleaved with real ones" {
     try testing.expectEqual(@as(usize, 2), regular);
     try testing.expectEqual(stream.items.len, it.offset());
 
+    if (interopReference()) |ref| {
+        defer alloc.free(ref);
+        const zst_path = try interopScratch(alloc, "zstd_interop_diff_skip_frame.zst");
+        defer {
+            interopDelete(zst_path);
+            alloc.free(zst_path);
+        }
+        const out_path = try interopScratch(alloc, "zstd_interop_diff_skip_out.bin");
+        defer {
+            interopDelete(out_path);
+            alloc.free(out_path);
+        }
+
+        try interopWrite(zst_path, stream.items);
+
+        // The reference must skip the opaque frames and concatenate the content.
+        const check = try interopRun(alloc, &.{ ref, "-d", "-f", "-q", zst_path, "-o", out_path });
+        defer alloc.free(check.stderr);
+        if (check.code != 0) {
+            test_log.info("reference rejected our skippable stream: {s}\n", .{check.stderr});
+            return error.ReferenceRejected;
+        }
+        const back = try interopRead(alloc, out_path);
+        defer alloc.free(back);
+        var expected: std.ArrayList(u8) = .empty;
+        defer expected.deinit(alloc);
+        try expected.appendSlice(alloc, first);
+        try expected.appendSlice(alloc, second);
+        try testing.expectEqualSlices(u8, expected.items, back);
+    }
+
     test_log.info("interop: skippable frames interleaved, {d} frames walked exactly\n", .{count});
 }
 test "interop: streaming output matches what the reference produced" {
@@ -2106,35 +2184,14 @@ test "interop: streaming output matches what the reference produced" {
     // a different code path from one-shot, so agreement on one does not imply
     // agreement on the other.
     const alloc = testing.allocator;
-    const ref = interopReference() orelse return;
-    defer alloc.free(ref);
-
-    const raw_path = try interopScratch(alloc, "zstd_interop_diff_stream_raw.bin");
-    defer {
-        interopDelete(raw_path);
-        alloc.free(raw_path);
-    }
-    const zst_path = try interopScratch(alloc, "zstd_interop_diff_stream_frame.zst");
-    defer {
-        interopDelete(zst_path);
-        alloc.free(zst_path);
-    }
-    const out_path = try interopScratch(alloc, "zstd_interop_diff_stream_out.bin");
-    defer {
-        interopDelete(out_path);
-        alloc.free(out_path);
-    }
 
     var payload: [200_000]u8 = undefined;
     var prng = std.Random.DefaultPrng.init(20240917);
     for (&payload) |*b| b.* = if (prng.random().boolean()) 'a' else 'b';
-    try interopWrite(raw_path, payload[0..]);
 
     // Streamed here, one awkward chunk at a time.
     var sc = StreamingCompressor.initWithOptions(alloc, .{ .level = 3 });
     defer sc.deinit();
-    // The output buffer is sized with the public bound, which is what it is for:
-    // one allocation up front, reused for every chunk.
     const bound = try compressBound(payload.len);
     var stream_out = try alloc.alloc(u8, bound);
     defer alloc.free(stream_out);
@@ -2154,74 +2211,104 @@ test "interop: streaming output matches what the reference produced" {
         if (produced.remaining == 0) break;
     }
 
-    try interopWrite(zst_path, stream_out[0..out_len]);
-    const check = try interopRun(alloc, &.{ ref, "-d", "-f", "-q", zst_path, "-o", out_path });
-    defer alloc.free(check.stderr);
-    if (check.code != 0) {
-        test_log.info("reference rejected our streamed frame: {s}\n", .{check.stderr});
-        return error.ReferenceRejected;
-    }
+    // Native streaming decompression verification
     {
+        var sd = StreamingDecompressor.init(alloc);
+        defer sd.deinit();
+        var decoded: std.ArrayList(u8) = .empty;
+        defer decoded.deinit(alloc);
+        var out_buf: [4096]u8 = undefined;
+        var at: usize = 0;
+        const compressed_slice = stream_out[0..out_len];
+        while (at < compressed_slice.len) {
+            const take = @min(at + 64, compressed_slice.len) - at;
+            const r = try sd.decompressStream(&out_buf, compressed_slice[at .. at + take]);
+            try decoded.appendSlice(alloc, out_buf[0..r.outProduced]);
+            at += r.inConsumed;
+            if (r.inConsumed == 0 and r.outProduced == 0 and !r.needsMore) break;
+        }
+        while (decoded.items.len < payload.len) {
+            const r = try sd.decompressStream(&out_buf, &.{});
+            try decoded.appendSlice(alloc, out_buf[0..r.outProduced]);
+            if (r.outProduced == 0) break;
+        }
+        try testing.expectEqualSlices(u8, payload[0..], decoded.items);
+    }
+    // Also one-shot decompress to verify frame validity
+    {
+        const one_shot = try decompress(alloc, stream_out[0..out_len]);
+        defer alloc.free(one_shot);
+        try testing.expectEqualSlices(u8, payload[0..], one_shot);
+    }
+
+    if (interopReference()) |ref| {
+        defer alloc.free(ref);
+        const raw_path = try interopScratch(alloc, "zstd_interop_diff_stream_raw.bin");
+        defer {
+            interopDelete(raw_path);
+            alloc.free(raw_path);
+        }
+        const zst_path = try interopScratch(alloc, "zstd_interop_diff_stream_frame.zst");
+        defer {
+            interopDelete(zst_path);
+            alloc.free(zst_path);
+        }
+        const out_path = try interopScratch(alloc, "zstd_interop_diff_stream_out.bin");
+        defer {
+            interopDelete(out_path);
+            alloc.free(out_path);
+        }
+
+        try interopWrite(raw_path, payload[0..]);
+        try interopWrite(zst_path, stream_out[0..out_len]);
+        const check = try interopRun(alloc, &.{ ref, "-d", "-f", "-q", zst_path, "-o", out_path });
+        defer alloc.free(check.stderr);
+        if (check.code != 0) {
+            test_log.info("reference rejected our streamed frame: {s}\n", .{check.stderr});
+            return error.ReferenceRejected;
+        }
         const back = try interopRead(alloc, out_path);
         defer alloc.free(back);
         try testing.expectEqualSlices(u8, payload[0..], back);
-    }
 
-    // The reference's frame, decoded through our streaming path.
-    const produced = try interopRun(alloc, &.{ ref, "-19", "-f", "-q", raw_path, "-o", zst_path });
-    defer alloc.free(produced.stderr);
-    if (produced.code != 0) return error.ReferenceFailed;
-    const their_frame = try interopRead(alloc, zst_path);
-    defer alloc.free(their_frame);
+        // The reference's frame, decoded through our streaming path.
+        const produced = try interopRun(alloc, &.{ ref, "-19", "-f", "-q", raw_path, "-o", zst_path });
+        defer alloc.free(produced.stderr);
+        if (produced.code != 0) return error.ReferenceFailed;
+        const their_frame = try interopRead(alloc, zst_path);
+        defer alloc.free(their_frame);
 
-    var sd = StreamingDecompressor.init(alloc);
-    defer sd.deinit();
-    var decoded: std.ArrayList(u8) = .empty;
-    defer decoded.deinit(alloc);
-    var out_buf: [4096]u8 = undefined;
-    var at: usize = 0;
-    while (at < their_frame.len) {
-        const take = @min(at + 1, their_frame.len) - at;
-        const r = try sd.decompressStream(&out_buf, their_frame[at .. at + take]);
-        try decoded.appendSlice(alloc, out_buf[0..r.outProduced]);
-        at += r.inConsumed;
-        if (r.inConsumed == 0 and r.outProduced == 0 and !r.needsMore) break;
-    }
-    while (decoded.items.len < payload.len) {
-        const r = try sd.decompressStream(&out_buf, &.{});
-        try decoded.appendSlice(alloc, out_buf[0..r.outProduced]);
-        if (r.outProduced == 0) break;
-    }
-    try testing.expectEqualSlices(u8, payload[0..], decoded.items);
+        var sd = StreamingDecompressor.init(alloc);
+        defer sd.deinit();
+        var decoded: std.ArrayList(u8) = .empty;
+        defer decoded.deinit(alloc);
+        var out_buf: [4096]u8 = undefined;
+        var at: usize = 0;
+        while (at < their_frame.len) {
+            const take = @min(at + 1, their_frame.len) - at;
+            const r = try sd.decompressStream(&out_buf, their_frame[at .. at + take]);
+            try decoded.appendSlice(alloc, out_buf[0..r.outProduced]);
+            at += r.inConsumed;
+            if (r.inConsumed == 0 and r.outProduced == 0 and !r.needsMore) break;
+        }
+        while (decoded.items.len < payload.len) {
+            const r = try sd.decompressStream(&out_buf, &.{});
+            try decoded.appendSlice(alloc, out_buf[0..r.outProduced]);
+            if (r.outProduced == 0) break;
+        }
+        try testing.expectEqualSlices(u8, payload[0..], decoded.items);
 
-    test_log.info("interop: streaming agreed in both directions over {d} bytes\n", .{payload.len});
+        test_log.info("interop: streaming agreed in both directions over {d} bytes\n", .{payload.len});
+    }
 }
 test "interop: randomized content agrees in both directions" {
     // Random sizes and levels, so the differential claim is not resting on a
     // handful of hand-picked cases.
     const alloc = testing.allocator;
-    const ref = interopReference() orelse return;
-    defer alloc.free(ref);
-
-    const raw_path = try interopScratch(alloc, "zstd_interop_diff_rand_raw.bin");
-    defer {
-        interopDelete(raw_path);
-        alloc.free(raw_path);
-    }
-    const zst_path = try interopScratch(alloc, "zstd_interop_diff_rand_frame.zst");
-    defer {
-        interopDelete(zst_path);
-        alloc.free(zst_path);
-    }
-    const out_path = try interopScratch(alloc, "zstd_interop_diff_rand_out.bin");
-    defer {
-        interopDelete(out_path);
-        alloc.free(out_path);
-    }
 
     var prng = std.Random.DefaultPrng.init(987654321);
     var buffer: [70000]u8 = undefined;
-    var agreed: usize = 0;
+    var native_agreed: usize = 0;
 
     for (0..12) |_| {
         const len = prng.random().intRangeAtMost(usize, 1, 60000);
@@ -2235,41 +2322,82 @@ test "interop: randomized content agrees in both directions" {
             };
         }
         const level: i32 = prng.random().intRangeAtMost(i32, 1, 19);
-        try interopWrite(raw_path, buffer[0..len]);
 
-        // Theirs to ours. The reference compresses at the level this test picked,
-        // so the frame it produces is the one being compared.
-        var level_flag: [8]u8 = undefined;
-        const level_text = try std.fmt.bufPrint(&level_flag, "-{d}", .{level});
-        const produced = try interopRun(alloc, &.{ ref, "-q", "-f", level_text, raw_path, "-o", zst_path });
-        defer alloc.free(produced.stderr);
-        if (produced.code != 0) continue;
-
-        const their_frame = try interopRead(alloc, zst_path);
-        defer alloc.free(their_frame);
-        const our_decoded = try decompress(alloc, their_frame);
-        defer alloc.free(our_decoded);
-        try testing.expectEqualSlices(u8, buffer[0..len], our_decoded);
-
-        // Ours to theirs.
+        // Native round-trip verification
         const ours = try compressWithOptions(alloc, buffer[0..len], .{ .level = level });
         defer alloc.free(ours);
-        try interopWrite(zst_path, ours);
-        const check = try interopRun(alloc, &.{ ref, "-d", "-f", "-q", zst_path, "-o", out_path });
-        defer alloc.free(check.stderr);
-        if (check.code != 0) {
-            test_log.info("reference rejected our frame at level {d}, {d} bytes\n", .{ level, len });
-            return error.ReferenceRejected;
-        }
-        const back = try interopRead(alloc, out_path);
-        defer alloc.free(back);
-        try testing.expectEqualSlices(u8, buffer[0..len], back);
-
-        agreed += 1;
+        const restored = try decompress(alloc, ours);
+        defer alloc.free(restored);
+        try testing.expectEqualSlices(u8, buffer[0..len], restored);
+        native_agreed += 1;
     }
+    try testing.expectEqual(@as(usize, 12), native_agreed);
 
-    test_log.info("interop: {d} randomized cases agreed in both directions\n", .{agreed});
-    try testing.expect(agreed > 0);
+    if (interopReference()) |ref| {
+        defer alloc.free(ref);
+        const raw_path = try interopScratch(alloc, "zstd_interop_diff_rand_raw.bin");
+        defer {
+            interopDelete(raw_path);
+            alloc.free(raw_path);
+        }
+        const zst_path = try interopScratch(alloc, "zstd_interop_diff_rand_frame.zst");
+        defer {
+            interopDelete(zst_path);
+            alloc.free(zst_path);
+        }
+        const out_path = try interopScratch(alloc, "zstd_interop_diff_rand_out.bin");
+        defer {
+            interopDelete(out_path);
+            alloc.free(out_path);
+        }
+
+        var prng_ref = std.Random.DefaultPrng.init(987654321);
+        var agreed: usize = 0;
+        for (0..12) |_| {
+            const len = prng_ref.random().intRangeAtMost(usize, 1, 60000);
+            for (buffer[0..len], 0..) |*b, i| {
+                b.* = switch (i % 3) {
+                    0 => 'a' + @as(u8, @intCast(i % 26)),
+                    1 => @intCast(i & 0xFF),
+                    else => prng_ref.random().int(u8),
+                };
+            }
+            const level: i32 = prng_ref.random().intRangeAtMost(i32, 1, 19);
+            try interopWrite(raw_path, buffer[0..len]);
+
+            // Theirs to ours.
+            var level_flag: [8]u8 = undefined;
+            const level_text = try std.fmt.bufPrint(&level_flag, "-{d}", .{level});
+            const produced = try interopRun(alloc, &.{ ref, "-q", "-f", level_text, raw_path, "-o", zst_path });
+            defer alloc.free(produced.stderr);
+            if (produced.code != 0) continue;
+
+            const their_frame = try interopRead(alloc, zst_path);
+            defer alloc.free(their_frame);
+            const our_decoded = try decompress(alloc, their_frame);
+            defer alloc.free(our_decoded);
+            try testing.expectEqualSlices(u8, buffer[0..len], our_decoded);
+
+            // Ours to theirs.
+            const ours = try compressWithOptions(alloc, buffer[0..len], .{ .level = level });
+            defer alloc.free(ours);
+            try interopWrite(zst_path, ours);
+            const check = try interopRun(alloc, &.{ ref, "-d", "-f", "-q", zst_path, "-o", out_path });
+            defer alloc.free(check.stderr);
+            if (check.code != 0) {
+                test_log.info("reference rejected our frame at level {d}, {d} bytes\n", .{ level, len });
+                return error.ReferenceRejected;
+            }
+            const back = try interopRead(alloc, out_path);
+            defer alloc.free(back);
+            try testing.expectEqualSlices(u8, buffer[0..len], back);
+
+            agreed += 1;
+        }
+
+        test_log.info("interop: {d} randomized cases agreed in both directions\n", .{agreed});
+        try testing.expect(agreed > 0);
+    }
 }
 test "compressBound covers every one-shot compression" {
     // The whole point of the bound: a buffer of exactly this size must hold the
@@ -2791,8 +2919,6 @@ test "dictionary: the reference decoder accepts a dictionary-compressed frame" {
     // The dictionary is written as raw content, which is the form a reference
     // decoder accepts without the entropy-table section, and the frame it
     // produces is decoded here by the reference with `-D`.
-    const reference = interopReference() orelse return;
-    defer testing.allocator.free(reference);
     const alloc = testing.allocator;
     const prefix = "shared-prefix-for-dictionary-frames: ";
     const samples = [_][]const u8{ prefix ++ "alpha", prefix ++ "beta", prefix ++ "gamma" };
@@ -2804,40 +2930,41 @@ test "dictionary: the reference decoder accepts a dictionary-compressed frame" {
     const frame = try compressWithOptions(alloc, payload, .{ .level = 9, .dictionary = &dict });
     defer alloc.free(frame);
 
-    const dict_path = try interopScratch(alloc, "zstd_interop_dict.bin");
-    defer alloc.free(dict_path);
-    const frame_path = try interopScratch(alloc, "zstd_interop_dict_frame.zst");
-    defer alloc.free(frame_path);
-    const out_path = try interopScratch(alloc, "zstd_interop_dict_out.bin");
-    defer alloc.free(out_path);
-    try interopWrite(dict_path, dict.content());
-    try interopWrite(frame_path, frame);
-    const result = try std.process.run(alloc, testing.io, .{
-        .argv = &.{ reference, "-d", "-f", "-q", "-D", dict_path, frame_path, "-o", out_path },
-    });
-    defer alloc.free(result.stdout);
-    defer alloc.free(result.stderr);
-    const code = interopExitCode(result.term) orelse return error.ReferenceFailed;
-    if (code != 0) {
-        test_log.info("reference rejected our dictionary frame: stderr={s}\n", .{result.stderr});
-        return error.ReferenceRejected;
+    // Native verification
+    const decoded_native = try decompressWithOptions(alloc, frame, .{ .dictionary = &dict });
+    defer alloc.free(decoded_native);
+    try testing.expectEqualSlices(u8, payload, decoded_native);
+
+    if (interopReference()) |reference| {
+        defer testing.allocator.free(reference);
+        const dict_path = try interopScratch(alloc, "zstd_interop_dict.bin");
+        defer alloc.free(dict_path);
+        const frame_path = try interopScratch(alloc, "zstd_interop_dict_frame.zst");
+        defer alloc.free(frame_path);
+        const out_path = try interopScratch(alloc, "zstd_interop_dict_out.bin");
+        defer alloc.free(out_path);
+        try interopWrite(dict_path, dict.content());
+        try interopWrite(frame_path, frame);
+        const result = try std.process.run(alloc, testing.io, .{
+            .argv = &.{ reference, "-d", "-f", "-q", "-D", dict_path, frame_path, "-o", out_path },
+        });
+        defer alloc.free(result.stdout);
+        defer alloc.free(result.stderr);
+        const code = interopExitCode(result.term) orelse return error.ReferenceFailed;
+        if (code != 0) {
+            test_log.info("reference rejected our dictionary frame: stderr={s}\n", .{result.stderr});
+            return error.ReferenceRejected;
+        }
+        const decoded = try interopRead(alloc, out_path);
+        defer alloc.free(decoded);
+        try testing.expectEqualSlices(u8, payload, decoded);
     }
-    const decoded = try interopRead(alloc, out_path);
-    defer alloc.free(decoded);
-    try testing.expectEqualSlices(u8, payload, decoded);
 }
 test "interop: multithreaded frames decode on the reference" {
     // The MT path writes independently encoded sections into one frame; a
     // second implementation is the independent check that they concatenate:
     // rep codes invalidated at every job boundary, overlap prefixes, and the
     // header written once around all of it.
-    const reference = interopReference() orelse return;
-    defer testing.allocator.free(reference);
-    const zst_path = try interopScratch(testing.allocator, "zstd_interop_mt.zst");
-    defer testing.allocator.free(zst_path);
-    const out_path = try interopScratch(testing.allocator, "zstd_interop_mt_out.bin");
-    defer testing.allocator.free(out_path);
-
     const payload = try interopMtPayload(testing.allocator);
     defer testing.allocator.free(payload);
     var checked: usize = 0;
@@ -2854,25 +2981,44 @@ test "interop: multithreaded frames decode on the reference" {
         const back = try decompress(testing.allocator, frame);
         defer testing.allocator.free(back);
         try testing.expectEqualSlices(u8, payload, back);
-
-        try interopWrite(zst_path, frame);
-        const result = try std.process.run(testing.allocator, testing.io, .{
-            .argv = &.{ reference, "-d", "-f", "-q", zst_path, "-o", out_path },
-        });
-        defer testing.allocator.free(result.stdout);
-        defer testing.allocator.free(result.stderr);
-        const code = interopExitCode(result.term) orelse return error.ReferenceFailed;
-        if (code != 0) {
-            test_log.info("reference rejected the MT frame at level {d}: {s}\n", .{ case.level, result.stderr });
-            return error.ReferenceRejected;
-        }
-        const decoded = try interopRead(testing.allocator, out_path);
-        defer testing.allocator.free(decoded);
-        try testing.expectEqualSlices(u8, payload, decoded);
         checked += 1;
     }
-    test_log.info("interop: the reference decoded {d} multithreaded frames\n", .{checked});
     try testing.expectEqual(3, checked);
+
+    if (interopReference()) |reference| {
+        defer testing.allocator.free(reference);
+        const zst_path = try interopScratch(testing.allocator, "zstd_interop_mt.zst");
+        defer testing.allocator.free(zst_path);
+        const out_path = try interopScratch(testing.allocator, "zstd_interop_mt_out.bin");
+        defer testing.allocator.free(out_path);
+
+        var ref_checked: usize = 0;
+        for ([_]struct { level: i32, checksum: bool }{
+            .{ .level = 1, .checksum = false },
+            .{ .level = 3, .checksum = false },
+            .{ .level = 9, .checksum = true },
+        }) |case| {
+            const frame = try compressMT(testing.allocator, testing.io, payload, .{ .level = case.level, .checksum = case.checksum }, 3);
+            defer testing.allocator.free(frame);
+            try interopWrite(zst_path, frame);
+            const result = try std.process.run(testing.allocator, testing.io, .{
+                .argv = &.{ reference, "-d", "-f", "-q", zst_path, "-o", out_path },
+            });
+            defer testing.allocator.free(result.stdout);
+            defer testing.allocator.free(result.stderr);
+            const code = interopExitCode(result.term) orelse return error.ReferenceFailed;
+            if (code != 0) {
+                test_log.info("reference rejected the MT frame at level {d}: {s}\n", .{ case.level, result.stderr });
+                return error.ReferenceRejected;
+            }
+            const decoded = try interopRead(testing.allocator, out_path);
+            defer testing.allocator.free(decoded);
+            try testing.expectEqualSlices(u8, payload, decoded);
+            ref_checked += 1;
+        }
+        test_log.info("interop: the reference decoded {d} multithreaded frames\n", .{ref_checked});
+        try testing.expectEqual(3, ref_checked);
+    }
 }
 
 test "canonical golden decompression vectors" {
