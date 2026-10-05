@@ -123,14 +123,14 @@ zig build -Dtarget=x86-windows
 ### Method 1: Zig Fetch (Recommended) - Latest Release (Zig 0.17.0)
 
 ```bash
-zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/v0.0.4.tar.gz
+zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.4.tar.gz
 ```
 
 > [!NOTE]
 > `zstd.zig` v0.0.4+ exclusively targets **Zig 0.17.0** (using new `std.Io` APIs and language builtins). **Zig 0.16.0 is not supported** in this release. If your project is on Zig 0.16.0, use the previous stable release `v0.0.3`:
 >
 > ```bash
-> zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/v0.0.3.tar.gz
+> zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.3.tar.gz
 > ```
 
 ### Method 2: Zig Fetch (Main Branch)
