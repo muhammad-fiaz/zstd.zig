@@ -36,38 +36,12 @@ pub fn main(init: std.process.Init) !void {
     }
     std.debug.print("1. Generated input stream: {d} bytes ({d} records)\n", .{ total_input_size, repeat_count });
 
-    // 2. Compress via explicit std.Io.Reader -> StreamingCompressor -> std.Io.Writer.Allocating
+    // 2. Short explicit std.Io Reader & Writer pipeline compression
     var comp_allocating = std.Io.Writer.Allocating.init(allocator);
     defer comp_allocating.deinit();
-    const comp_writer = &comp_allocating.writer;
 
     var in_reader = std.Io.Reader.fixed(input_buffer);
-
-    var compressor = try zstd.StreamingCompressor.init(allocator, 5);
-    defer compressor.deinit();
-    compressor.setChecksumFlag(true);
-
-    const chunk_size: usize = 256;
-    var comp_out_chunk: [65536]u8 = undefined;
-
-    while (in_reader.bufferedLen() > 0) {
-        const to_read = @min(chunk_size, in_reader.bufferedLen());
-        const chunk = try in_reader.take(to_read);
-
-        const res = try compressor.compressStream(&comp_out_chunk, chunk, .cont);
-        if (res.outProduced > 0) {
-            try comp_writer.writeAll(comp_out_chunk[0..res.outProduced]);
-        }
-    }
-
-    // Finalize the frame
-    while (true) {
-        const res = try compressor.compressStream(&comp_out_chunk, "", .end);
-        if (res.outProduced > 0) {
-            try comp_writer.writeAll(comp_out_chunk[0..res.outProduced]);
-        }
-        if (res.remaining == 0) break;
-    }
+    try zstd.io.compressPipeline(allocator, &in_reader, &comp_allocating.writer, 5);
 
     const compressed_frame = comp_allocating.written();
     const comp_ratio = @as(f64, @floatFromInt(compressed_frame.len)) / @as(f64, @floatFromInt(total_input_size)) * 100.0;
@@ -77,31 +51,14 @@ pub fn main(init: std.process.Init) !void {
         comp_ratio,
     });
 
-    // 3. Decompress via explicit std.Io.Reader -> StreamingDecompressor -> std.Io.Writer.fixed
+    // 3. Short explicit std.Io Reader & Writer pipeline decompression
     var decomp_reader = std.Io.Reader.fixed(compressed_frame);
 
     var restored_buffer = try allocator.alloc(u8, total_input_size);
     defer allocator.free(restored_buffer);
 
     var decomp_writer = std.Io.Writer.fixed(restored_buffer);
-    var decompressor = zstd.StreamingDecompressor.init(allocator);
-    defer decompressor.deinit();
-
-    var decomp_out_chunk: [2048]u8 = undefined;
-    const dec_chunk_size: usize = 128;
-
-    while (true) {
-        const chunk = if (decomp_reader.bufferedLen() > 0)
-            try decomp_reader.take(@min(dec_chunk_size, decomp_reader.bufferedLen()))
-        else
-            &.{};
-
-        const res = try decompressor.decompressStream(&decomp_out_chunk, chunk);
-        if (res.outProduced > 0) {
-            try decomp_writer.writeAll(decomp_out_chunk[0..res.outProduced]);
-        }
-        if (decomp_reader.bufferedLen() == 0 and res.outProduced == 0) break;
-    }
+    try zstd.io.decompressPipeline(allocator, &decomp_reader, &decomp_writer);
 
     const decomp_written_len = decomp_writer.end;
     std.debug.print("3. Stream-decompressed: {d} -> {d} bytes\n", .{ compressed_frame.len, decomp_written_len });

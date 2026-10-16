@@ -310,10 +310,6 @@ gtag('config', '${GA_ID}');`,
       { text: "Guide", link: "/guide/getting-started" },
       { text: "API", link: "/api/" },
       { text: "Examples", link: "/examples/" },
-      {
-        text: "Releases",
-        link: "https://github.com/muhammad-fiaz/zstd.zig/releases",
-      },
       { text: "Security", link: "https://github.com/muhammad-fiaz/zstd.zig/blob/main/SECURITY.md" },
       {
         text: "Support",

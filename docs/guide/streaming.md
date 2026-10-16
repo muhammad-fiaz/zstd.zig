@@ -171,6 +171,31 @@ while (i < compressed.len) {
 std.debug.print("{s}\n", .{d_buf[0..d_pos]}); // "Hello, World!"
 ```
 
+## Explicit std.Io Reader & Writer Pipeline (`zstd.io`)
+
+For short, one-shot pipeline streaming directly connecting an explicit `std.Io.Reader` to a `std.Io.Writer`:
+
+```zig
+const std = @import("std");
+const zstd = @import("zstd");
+
+// Compress directly from an explicit Reader into an explicit Writer
+var in_reader = std.Io.Reader.fixed(uncompressed_data);
+var comp_storage = std.Io.Writer.Allocating.init(allocator);
+defer comp_storage.deinit();
+
+try zstd.io.compressPipeline(allocator, &in_reader, &comp_storage.writer, 3);
+const compressed = comp_storage.written();
+
+// Decompress directly from an explicit Reader into an explicit Writer
+var comp_reader = std.Io.Reader.fixed(compressed);
+var decomp_storage = std.Io.Writer.Allocating.init(allocator);
+defer decomp_storage.deinit();
+
+try zstd.io.decompressPipeline(allocator, &comp_reader, &decomp_storage.writer);
+const restored = decomp_storage.written();
+```
+
 ## Reusing Streams
 
 ```zig
