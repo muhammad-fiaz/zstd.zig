@@ -194,8 +194,8 @@ test "v0.2 decodes to its exact content through the public entry points" {
     }
 }
 test "v0.2 round trips through its own encoder" {
-    // Encoder and decoder agreeing is the compatibility claim that does not need
-    // the reference implementation: what this library writes, it also reads.
+    // Encoder and decoder agreeing establishes self-contained lossless fidelity:
+    // what this library writes, it also reads.
     const alloc = testing.allocator;
     for ([_][]const u8{ "", "x", golden.block[0..], "abcabcabcabcabcabcabc" }) |src| {
         const bound = v02.compressBound(src.len);

@@ -60,13 +60,13 @@ fn runStripe(stripe: *Stripe) !void {
     while (index < messages) : (index += stripe.stride) {
         const payload = payloadFor(index, stripe.buffer);
         const frame = try compressor.compressAlloc(payload);
+        defer stripe.allocator.free(frame);
         total_in += payload.len;
         total_out += frame.len;
 
         const restored = try decompressor.decompressAlloc(frame);
         defer stripe.allocator.free(restored);
         if (!std.mem.eql(u8, payload, restored)) return error.RoundTripFailed;
-        stripe.allocator.free(frame);
     }
     stripe.totals.* = .{ .in = total_in, .out = total_out };
 }

@@ -220,4 +220,13 @@ const decompressed = zstd.decompress(allocator, data) catch |err| {
     }
     return err;
 };
+defer allocator.free(decompressed);
 ```
+
+## Memory Management & Safety
+
+1. **Client Memory Ownership**: Decompressed buffers allocated by `zstd.decompress(allocator, ...)` or `decompressAlloc(...)` are owned by the calling code. Always release them using `defer allocator.free(decompressed)`.
+2. **Context Lifecycle**: Decompression contexts (`DecompressionContext`, `Decoder`, `StreamingDecompressor`) maintain sliding window state and tables that are safely released upon calling `defer dctx.deinit()`.
+3. **Pre-Allocated Slices (`decompressInto`)**: Allows decompressing directly into a stack buffer or pre-sized arena without allocating memory on the heap.
+4. **Decompression Bomb Protection**: The decoder enforces `maxWindowSize` (default 128 MiB). Any frame declaring a window exceeding this threshold is immediately refused with `error.WindowTooLarge` before allocating memory.
+5. **Leak-Free Unwinding**: All block and sequence decoding functions unwind with `errdefer`, guaranteeing zero memory leaks even on corrupt or truncated frames.

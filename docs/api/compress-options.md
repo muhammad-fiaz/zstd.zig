@@ -58,15 +58,18 @@ const zstd = @import("zstd");
 
 // Default options via compress()
 const c1 = try zstd.compress(allocator, data);
+defer allocator.free(c1);
 
 // With explicit level
 const c2 = try zstd.compressWithLevel(allocator, data, 9);
+defer allocator.free(c2);
 
 // With CompressionOptions
 const c3 = try zstd.compressWithOptions(allocator, data, .{
     .level = 9,
     .checksum = true,
 });
+defer allocator.free(c3);
 
 // All options + strategy
 const c4 = try zstd.compressWithOptions(allocator, data, .{
@@ -81,12 +84,20 @@ const c4 = try zstd.compressWithOptions(allocator, data, .{
     .checksum = true,
     .dictId = 42,
     .contentSize = @as(?u64, data.len),
-
 });
+defer allocator.free(c4);
 
 // Derive tuned options then tweak
 var tuned = zstd.getCompressionParameters(12, data.len, 20);
 tuned.checksum = true;
 const c5 = try zstd.compressWithOptions(allocator, data, tuned);
+defer allocator.free(c5);
 ```
+
+## Memory Management & Safety
+
+1. **Client Allocator Passing**: All compression routines accept an explicit `allocator: std.mem.Allocator`. The library never allocates on a hidden or global heap.
+2. **Result Ownership**: Returned byte slices (`[]u8`) are freshly allocated with the provided allocator. The caller is responsible for freeing them via `defer allocator.free(...)`.
+3. **Zero-Allocation Alternative**: Callers wishing to avoid allocations can use `compressInto(allocator, dst, src, level)` with a pre-sized destination buffer bounded by `compressBound(src.len)`.
+4. **Parameter Validation**: Window, hash, chain, and search logs are checked against architectural limits (`window_log_min`/`window_log_max`). Out-of-range parameters return `error.ParameterOutOfBound` rather than causing memory faults or invalid buffer sizing.
 

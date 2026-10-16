@@ -126,3 +126,9 @@ if (size == zstd.CONTENTSIZE_UNKNOWN) {
 Other top-level constants: `MAGICNUMBER` (`0xFD2FB528`), `MAGIC_DICTIONARY`
 (`0xEC30A437`), `MAGIC_SKIPPABLE_START` (`0x184D2A50`),
 `MAGIC_SKIPPABLE_MASK` (`0xFFFFFFF0`).
+
+## Memory Management & Safety
+
+1. **Zero-Allocation Inspection**: `isFrame`, `isSkippableFrame`, `getFrameHeader`, and `getFrameContentSize` perform zero dynamic allocations, operating strictly on caller-supplied input slices.
+2. **Buffer Bounds Safety**: `readSkippableFrame` and `writeSkippableFrame` operate directly on caller slices with bounds verification to prevent out-of-bounds reads and writes.
+3. **Safe Header Parsing**: Header reading validates all variable-length descriptors, dictionary identifiers, and window bounds, safely returning descriptive error codes on malformed inputs.

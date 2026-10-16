@@ -25,8 +25,7 @@ pub const min_window_log: u8 = 20;
 /// Upper bound on the table log, matching the format's own limits.
 pub const hash_log_max: u8 = 30;
 pub const hash_log_min: u8 = 6;
-/// Entries per bucket are `2^bucket_size_log`; four is the floor and matches
-/// what the reference implementation uses by default.
+/// Entries per bucket are `2^bucket_size_log`; four is the default floor.
 pub const bucket_size_log_min: u8 = 4;
 pub const bucket_size_log_max: u8 = 8;
 

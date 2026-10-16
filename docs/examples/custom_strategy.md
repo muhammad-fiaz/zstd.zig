@@ -76,6 +76,7 @@ pub fn main(init: std.process.Init) !void {
             .level = 12,
             .strategy = strategy,
         });
+        defer allocator.free(frame);
         sizes[i] = frame.len;
 
         // Verify round-trip decompression
@@ -85,7 +86,6 @@ pub fn main(init: std.process.Init) !void {
             return error.RoundTripFailed;
         }
         if (best == null or frame.len < best.?) best = frame.len;
-        allocator.free(frame);
     }
 
     for (strategies, 0..) |strategy, i| {

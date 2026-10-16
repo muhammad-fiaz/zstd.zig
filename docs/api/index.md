@@ -238,3 +238,15 @@ zstd.zig exposes modular, cohesive namespaces grouping functionality by responsi
 - `decompress(allocator, dst, src) ZstdError!Result` — decompress any recognized historic frame.
 - `v01` through `v07` — per-version module declarations.
 
+## Memory Management & Safety Architecture
+
+1. **Explicit Client Allocator Control**: Every function and context allocating memory requires an explicit `std.mem.Allocator`. There are zero global, implicit, or hidden heap allocations.
+2. **Deterministic Ownership & Cleanup**:
+   - Dynamic buffers (`[]u8`) returned by one-shot `compress`, `decompress`, `compressAlloc`, or `decompressAlloc` are owned by the client and must be freed with `defer allocator.free(...)`.
+   - Contexts (`CompressionContext`, `DecompressionContext`, `Encoder`, `Decoder`, `StreamingCompressor`, `StreamingDecompressor`, `Dictionary`) manage their own internal tables and must be released with `defer instance.deinit()`.
+3. **Zero-Allocation Execution**:
+   - `compressInto`, `decompressInto`, and `FrameIterator` provide zero-allocation workflows by working directly on caller-allocated memory slices.
+4. **Out-of-the-Box Memory Safety**:
+   - Bounds checks, frame header validation, and maximum window limits (`maxWindowSize`) protect against buffer overflows, invalid pointer arithmetic, and decompression bombs.
+   - All errors unwind cleanly with `errdefer`, guaranteeing 0 memory leaks on failure paths.
+

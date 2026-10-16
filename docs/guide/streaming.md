@@ -179,3 +179,10 @@ cstream.reset();
 dstream.reset();
 // Ready for a new compression/decompression job
 ```
+
+## Memory Management & Safety
+
+1. **Explicit Stream Allocators**: Both `StreamingCompressor` and `StreamingDecompressor` require an explicit `std.mem.Allocator` at initialization.
+2. **Context Resource Cleanup**: Call `defer cstream.deinit()` and `defer dstream.deinit()` to reclaim internal working buffers.
+3. **Chunk-by-Chunk Zero Allocation**: Streaming operations write directly into caller-managed slice destinations (`out: []u8`), avoiding continuous heap churn.
+4. **State Machine Integrity**: End directives (`.cont`, `.flush`, `.end`) ensure streaming states advance correctly without dangling memory or buffer overruns.

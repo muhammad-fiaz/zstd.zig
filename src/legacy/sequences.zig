@@ -527,9 +527,9 @@ fn decodeSequencePeakOrder(
 
 /// Writes one sequence into the output, advancing `written` and `lit_read`.
 ///
-/// Every bound the reference checks with pointer arithmetic is checked here with
-/// indices: the literal run must fit what is left of the literal section, the
-/// match must fit the output, and the distance must not reach before the frame.
+/// Every boundary condition is rigorously validated with indices: the literal run
+/// must fit what is left of the literal section, the match must fit the output,
+/// and the distance must not reach before the frame.
 fn execSequence(
     version: format.Version,
     out: Output,

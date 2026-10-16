@@ -110,7 +110,7 @@ pub const pool = @import("common/pool.zig");
 /// Client-side Encoder and Decoder abstractions with explicit lifecycle control.
 pub const Encoder = cctx.Encoder;
 pub const Decoder = dctx.Decoder;
-/// Short aliases matching the reference client naming.
+/// Short aliases matching idiomatic client naming.
 pub const Compressor = cctx.CompressionContext;
 pub const Decompressor = dctx.DecompressionContext;
 pub const Dictionary = dict_mod.Dictionary;

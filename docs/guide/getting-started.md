@@ -76,12 +76,15 @@ pub fn main() !void {
 ```zig
 // Use fast compression (level 1)
 const fast = try zstd.compressWithLevel(allocator, data, 1);
+defer allocator.free(fast);
 
 // Use best compression (level 19)
 const best = try zstd.compressWithLevel(allocator, data, 19);
+defer allocator.free(best);
 
 // Use a custom level 12
 const custom = try zstd.compressWithLevel(allocator, data, 12);
+defer allocator.free(custom);
 ```
 
 ### With Options
@@ -89,6 +92,7 @@ const custom = try zstd.compressWithLevel(allocator, data, 12);
 ```zig
 const opts = zstd.CompressionOptions{ .level = 9, .checksum = true, .windowLog = 20 };
 const compressed = try zstd.compressWithOptions(allocator, data, opts);
+defer allocator.free(compressed);
 ```
 
 ## Reusable Contexts
@@ -112,6 +116,12 @@ defer allocator.free(c2);
 const d1 = try dctx.decompressAlloc(c1);
 defer allocator.free(d1);
 ```
+
+## Memory Management & Safety
+
+1. **Explicit Allocators**: The caller always controls memory by passing `allocator: std.mem.Allocator`.
+2. **Deterministic Cleanup**: All returned slices (`[]u8`) are caller-owned and must be freed with `defer allocator.free(...)`. Contexts are released with `defer ctx.deinit()`.
+3. **Out-of-the-Box Memory Safety**: The library verifies input bounds, checks destination buffer sizes, and unwinds cleanly with `errdefer` on failure.
 
 ## What's Next
 

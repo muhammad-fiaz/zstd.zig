@@ -26,8 +26,11 @@ Use with `zstd.compressWithLevel` or `CompressionContext.initWithLevel`:
 ```zig
 // Numeric levels
 const c1 = try zstd.compressWithLevel(allocator, data, 1);  // fast
+defer allocator.free(c1);
 const c2 = try zstd.compressWithLevel(allocator, data, 3);  // default
+defer allocator.free(c2);
 const c3 = try zstd.compressWithLevel(allocator, data, 19); // best
+defer allocator.free(c3);
 
 // With context
 var cctx = zstd.CompressionContext.initWithLevel(allocator, 12);
@@ -37,6 +40,7 @@ cctx.setLevel(6);
 // Via options
 const opts = zstd.CompressionOptions{ .level = 9 };
 const c4 = try zstd.compressWithOptions(allocator, data, opts);
+defer allocator.free(c4);
 
 // Tuned via getCompressionParameters
 var tuned = zstd.getCompressionParameters(12, data.len, 20);
@@ -69,6 +73,7 @@ const opts = zstd.CompressionOptions{
     .windowLog = 20,
 };
 const compressed = try zstd.compressWithOptions(allocator, data, opts);
+defer allocator.free(compressed);
 ```
 
 Available strategies:
@@ -84,6 +89,13 @@ Available strategies:
 | `.btopt` | 7 | BT Opt |
 | `.btultra` | 8 | BT Ultra |
 | `.btultra2` | 9 | BT Ultra2 |
+
+## Memory Management & Safety
+
+1. **Explicit Client-Side Allocator**: All allocating functions require an explicit `std.mem.Allocator`. No global or hidden memory allocations occur.
+2. **Buffer Lifetime & Ownership**: Every slice returned by `compress*` functions is owned exclusively by the caller and must be released with `defer allocator.free(...)`.
+3. **Context Lifecycle**: A `CompressionContext` allocates internal search tables and workspaces upon `init` / `initWithLevel` and completely frees them when `deinit()` is called.
+4. **Memory Safety**: Strategies, match finders, and window buffers validate all array bounds with indices. Malformed inputs or unfulfillable bounds return explicit `ZstdError` codes rather than causing memory unsafety.
 
 ## Removed Old API
 

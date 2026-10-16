@@ -104,3 +104,10 @@ The loop above is the whole streaming contract: feed input, take output, repeat
 until the input is consumed, then drain what is still buffered. There is no
 one-shot helper on this type - `zstd.decompress` is the one-shot path, and using it
 here would defeat the purpose of a streaming decompressor.
+
+## Memory Management & Safety
+
+1. **Explicit Allocator Initialization**: `StreamingDecompressor.init(allocator)` accepts the caller's allocator to back the internal sliding window and header staging buffers.
+2. **Deterministic Cleanup**: Call `defer dstream.deinit()` to release all internal buffers upon exiting scope.
+3. **Chunk-by-Chunk Zero Allocation**: `decompressStream` reads and writes directly between the caller's slices without performing memory allocations during the streaming loop.
+4. **Memory Safety Bounds**: Enforces maximum window constraints and valid FSE / Huffman bitstream parsing to prevent memory corruption or buffer overflows from malformed chunks.

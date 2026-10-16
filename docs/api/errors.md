@@ -103,3 +103,9 @@ const r2 = zstd.decompress(allocator, truncated); // -> error.SrcSizeWrong
 var small: [2]u8 = undefined;
 const r3 = zstd.decompressInto(allocator, &small, good); // -> error.DstSizeTooSmall
 ```
+
+## Memory Safety Guarantees on Errors
+
+1. **Zero Resource Leaks on Failure**: When an operation encounters an error (`Corruption`, `ChecksumWrong`, `SrcSizeWrong`, `DstSizeTooSmall`), all internal temporary allocations are immediately freed via `errdefer`.
+2. **Deterministic Failure Behavior**: Invalid, truncated, or malicious streams never cause out-of-bounds pointer reads or undefined behavior. Errors are strictly returned as typed `ZstdError` values.
+3. **Safe Memory State**: Callers can safely continue using contexts after error returns; calling `reset()` clears the internal streaming state for subsequent operations.

@@ -133,3 +133,10 @@ for (chunks, 0..) |chunk, i| {
 }
 ```
 
+## Memory Management & Safety
+
+1. **Explicit Stream Allocator**: `StreamingCompressor.init` and `initWithOptions` receive `allocator: std.mem.Allocator`.
+2. **Deterministic Cleanup**: Always call `defer cstream.deinit()`. This frees the internal block accumulation buffer and any temporary match-finder tables.
+3. **Caller-Managed I/O Slices**: `compressStream` writes directly into the caller's slice `out: []u8` with zero per-chunk heap allocations.
+4. **Out-of-the-Box Memory Safety**: Stream state transitions (`.cont`, `.flush`, `.end`) prevent double-finalization or writing after closure. Bounds checking ensures no slice out-of-bounds writes occur.
+
