@@ -20,7 +20,7 @@ The decoder implements the complete Zstandard entropy layer natively, following 
 | Entropy + rep-offset carry-over across blocks in a frame | ✅ |
 | XXH64 content checksum validation | ✅ |
 
-Interoperability is verified bidirectionally against the official C `zstd` v1.6.0 CLI at levels 1 - 22 including `--ultra -22`.
+Interoperability is verified bidirectionally against `zstd` v1.6.0 CLI at levels 1 - 22 including `--ultra -22`.
 
 ## One-Shot Decompression
 
@@ -212,7 +212,7 @@ Decompression can fail with `ZstdError`:
 const decompressed = zstd.decompress(allocator, data) catch |err| {
     switch (err) {
         error.PrefixUnknown => std.debug.print("Not a zstd frame\n", .{}),
-        error.CorruptionDetected => std.debug.print("Data corrupted\n", .{}),
+        error.Corruption => std.debug.print("Data corrupted\n", .{}),
         error.SrcSizeWrong => std.debug.print("Source too short\n", .{}),
         error.DstSizeTooSmall => std.debug.print("Destination too small\n", .{}),
         error.ChecksumWrong => std.debug.print("Checksum mismatch\n", .{}),

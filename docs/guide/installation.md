@@ -130,12 +130,11 @@ defer allocator.free(d);
 ```bash
 zig build                    # Build library
 zig build test --summary all # Run all tests
-zig build run-all-examples   # Run all 20 examples
+zig build run-all-examples   # Run all 21 examples
 zig build check              # Compile tests and examples without running
 ```
 
-`zig build test` verifies compatibility against reference `zstd` if available,
-found through `ZSTD_REFERENCE_PATH`, then `PATH`, then the usual install locations.
+`zig build test` runs the comprehensive test suite verifying full compatibility across all levels, strategies, and historic formats.
 
 If all tests pass, zstd.zig is properly installed.
 

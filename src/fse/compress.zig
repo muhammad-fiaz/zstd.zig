@@ -21,15 +21,15 @@ pub fn countFrequencies(counts: []u32, src: []const u8, max_symbol: usize) usize
 
 pub fn minTableLog(src_size: usize, max_symbol_value: usize) u8 {
     if (src_size <= 1) return min_table_log;
-    const min_bits_src: u32 = (31 - @clz(@as(u32, @intCast(src_size)))) + 1;
-    const min_bits_symbols: u32 = (31 - @clz(@as(u32, @intCast(max_symbol_value)))) + 2;
+    const min_bits_src: u32 = std.math.log2_int(u32, @intCast(src_size)) + 1;
+    const min_bits_symbols: u32 = std.math.log2_int(u32, @intCast(max_symbol_value)) + 2;
     const min_bits = @min(min_bits_src, min_bits_symbols);
     return @intCast(min_bits);
 }
 
 pub fn optimalTableLog(max_table_log_in: u8, src_size: usize, max_symbol_value: usize) u8 {
     if (src_size <= 1) return min_table_log;
-    const max_bits_src: u32 = if (src_size > 1) (31 - @clz(@as(u32, @intCast(src_size - 1)))) -% 2 else 0;
+    const max_bits_src: u32 = if (src_size > 1) std.math.log2_int(u32, @intCast(src_size - 1)) -% 2 else 0;
     var tableLog: u32 = if (max_table_log_in == 0) max_table_log else max_table_log_in;
     if (max_bits_src < tableLog) tableLog = max_bits_src;
     const min_bits = minTableLog(src_size, max_symbol_value);
@@ -213,8 +213,7 @@ pub fn writeNCount(dst: []u8, normalized: []const i16, max_symbol_value: usize, 
                 start += 24;
                 bitStream += @as(u32, 0xFFFF) << @as(std.math.Log2Int(u32), @intCast(bitCount));
                 if (outPos + 2 > dst.len) return error.DstSizeTooSmall;
-                dst[outPos] = @truncate(bitStream);
-                dst[outPos + 1] = @truncate(bitStream >> 8);
+                std.mem.writeInt(u16, dst[outPos..][0..2], @truncate(bitStream), .little);
                 outPos += 2;
                 bitStream >>= 16;
             }
@@ -227,8 +226,7 @@ pub fn writeNCount(dst: []u8, normalized: []const i16, max_symbol_value: usize, 
             bitCount += 2;
             if (bitCount > 16) {
                 if (outPos + 2 > dst.len) return error.DstSizeTooSmall;
-                dst[outPos] = @truncate(bitStream);
-                dst[outPos + 1] = @truncate(bitStream >> 8);
+                std.mem.writeInt(u16, dst[outPos..][0..2], @truncate(bitStream), .little);
                 outPos += 2;
                 bitStream >>= 16;
                 bitCount -= 16;
@@ -267,15 +265,14 @@ pub fn writeNCount(dst: []u8, normalized: []const i16, max_symbol_value: usize, 
 
     if (bitCount > 0) {
         if (outPos + 2 <= dst.len) {
-            dst[outPos] = @truncate(bitStream);
-            dst[outPos + 1] = @truncate(bitStream >> 8);
+            std.mem.writeInt(u16, dst[outPos..][0..2], @truncate(bitStream), .little);
             outPos += (bitCount + 7) / 8;
         } else {
             const bytes = (bitCount + 7) / 8;
             if (outPos + bytes > dst.len) return error.DstSizeTooSmall;
-            for (0..bytes) |b| {
-                dst[outPos + b] = @truncate(bitStream >> @as(std.math.Log2Int(u32), @intCast(b * 8)));
-            }
+            var tmp: [4]u8 = undefined;
+            std.mem.writeInt(u32, &tmp, bitStream, .little);
+            @memcpy(dst[outPos..][0..bytes], tmp[0..bytes]);
             outPos += bytes;
         }
     }
@@ -368,7 +365,7 @@ pub fn buildCTable(allocator: std.mem.Allocator, normalized: []const i16, max_sy
                 total += 1;
             },
             else => {
-                const max_bits_out = tableLog - (31 - @as(u8, @intCast(@clz(@as(u32, @intCast(norm - 1))))));
+                const max_bits_out = tableLog - @as(u8, @intCast(std.math.log2_int(u32, @intCast(norm - 1))));
                 const min_state_plus = @as(u32, @intCast(norm)) << @as(std.math.Log2Int(u32), @intCast(max_bits_out));
                 symbol_tt[s] = .{
                     .deltaFindState = @intCast(@as(i32, @intCast(total)) - norm),

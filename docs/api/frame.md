@@ -86,8 +86,8 @@ Get original content size with sentinels:
 
 ```zig
 pub fn getFrameContentSize(src: []const u8) u64
-pub const CONTENTSIZE_UNKNOWN: u64 = 0xFFFFFFFFFFFFFFFF - 1;
-pub const CONTENTSIZE_ERROR:   u64 = 0xFFFFFFFFFFFFFFFF - 2;
+pub const CONTENTSIZE_UNKNOWN: u64 = 0xFFFFFFFFFFFFFFFF;
+pub const CONTENTSIZE_ERROR:   u64 = 0xFFFFFFFFFFFFFFFF - 1;
 ```
 
 ```zig

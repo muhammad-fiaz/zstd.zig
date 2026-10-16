@@ -149,11 +149,9 @@ pub const RepHistory = struct {
     /// immediately before it: no repeat code may resolve against offsets this
     /// encoder never saw, so every match must be written as an explicit distance
     /// until enough explicit pushes rebuild a history both encoder and decoder
-    /// agree on. Upstream `ZSTD_invalidateRepCodes` does the same with zeros;
-    /// zero is a real match distance for `repeatMatch` here, so an unreachable
-    /// one takes its place: greater than any window, it can never be proposed as
-    /// a match or compared equal to one, while `dist < 4` stays unencodable
-    /// exactly as the format requires.
+    /// agree on. Invalidation uses an unreachable offset value: greater than any window,
+    /// it can never be proposed as a match or compared equal to one, while `dist < 4`
+    /// stays unencodable exactly as the format requires.
     pub fn invalidated() RepHistory {
         return .{ .r = .{ std.math.maxInt(u32), std.math.maxInt(u32), std.math.maxInt(u32) } };
     }
@@ -700,7 +698,7 @@ const Sink = struct {
     /// Queues `n` literal bytes starting at `from`.
     fn addLiterals(self: *Sink, src: []const u8, from: usize, n: usize) void {
         if (n == 0) return;
-        std.mem.copyForwards(u8, self.literals[self.nLit..][0..n], src[from..][0..n]);
+        @memcpy(self.literals[self.nLit..][0..n], src[from..][0..n]);
         self.nLit += n;
     }
 
@@ -794,7 +792,7 @@ pub fn findSequencesWindowed(
     return parseLazy(allocator, src, start, params, reps, long_matches, max_offset);
 }
 
-// --- Greedy / lazy ---------------------------------------------------------
+// Greedy and lazy match parsing
 
 /// One step of a parse: a match, and the position it was found at.
 const Candidate = struct { match: Match, pos: usize };
@@ -987,7 +985,7 @@ pub fn windowLimitFor(windowLog: u8) u32 {
     return @as(u32, 1) << @intCast(windowLog);
 }
 
-// --- Optimal ---------------------------------------------------------------
+// Optimal match parsing
 
 /// What the backward pass recorded for each position.
 const Opt = struct {
@@ -1138,7 +1136,7 @@ fn cheapestRepCode(reps: *const RepHistory, dist: u32, lit_len: u32) u8 {
     return offsetCode(dist) orelse 31;
 }
 
-// --- Finder construction ---------------------------------------------------
+// Match finder construction
 
 /// Builds the engine `params` asks for.
 pub const FinderHandle = struct {
@@ -1202,7 +1200,7 @@ pub fn paramsForStrategy(strategy: constants.Strategy, level: i32) SearchParams 
     // The tree is indexed by hash like the chain, and its walk budget comes
     // from the same log: deeper walks cost more but find more.
     out.treeLog = clampLog(params.chainLog, 10, 20);
-    const requested: u16 = if (params.searchLog == 0) 8 else @intCast(params.searchLog);
+    const requested: u16 = if (params.searchLog == 0) 8 else (@as(u16, 1) << @as(u4, @intCast(@min(15, params.searchLog))));
     switch (strategy) {
         .fast => {
             out.finder = .table;
@@ -1230,22 +1228,22 @@ pub fn paramsForStrategy(strategy: constants.Strategy, level: i32) SearchParams 
         },
         .btlazy2 => {
             out.finder = .tree;
-            out.searchDepth = @max(@as(u16, requested), 16);
+            out.searchDepth = @max(requested, 16);
             out.lazySteps = 2;
         },
         .btopt => {
             out.finder = .tree;
-            out.searchDepth = @max(@as(u16, requested), 24);
+            out.searchDepth = @max(requested, 24);
             out.optimal = true;
         },
         .btultra => {
             out.finder = .tree;
-            out.searchDepth = @max(@as(u16, requested), 32);
+            out.searchDepth = @max(requested, 32);
             out.optimal = true;
         },
         .btultra2 => {
             out.finder = .tree;
-            out.searchDepth = @max(@as(u16, requested), 48);
+            out.searchDepth = @max(requested, 48);
             out.optimal = true;
         },
     }
@@ -1599,7 +1597,7 @@ test "every strategy round trips through the sequence sink" {
         var outPos: usize = 0;
         var litPos: usize = 0;
         for (out.seqs) |sq| {
-            std.mem.copyForwards(u8, dst[outPos..][0..sq.litLen], out.literals[litPos..][0..sq.litLen]);
+            @memcpy(dst[outPos..][0..sq.litLen], out.literals[litPos..][0..sq.litLen]);
             outPos += sq.litLen;
             litPos += sq.litLen;
             const dist = switch (sq.offCode) {
@@ -1640,7 +1638,7 @@ test "every strategy round trips through the sequence sink" {
             }
         }
         const tail = out.literals.len - litPos;
-        std.mem.copyForwards(u8, dst[outPos..][0..tail], out.literals[litPos..][0..tail]);
+        @memcpy(dst[outPos..][0..tail], out.literals[litPos..][0..tail]);
         outPos += tail;
         try testing.expectEqual(src.len, outPos);
         if (!std.mem.eql(u8, &src, dst[0..outPos])) {

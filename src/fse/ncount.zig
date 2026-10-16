@@ -14,17 +14,17 @@ pub fn readNCount(
     table_log_ptr: *u8,
     src: []const u8,
 ) errors.ZstdError!usize {
-    if (src.len == 0) return error.InvalidFseTable; // FDBG1
+    if (src.len == 0) return error.InvalidFseTable;
 
     // Buffers smaller than 8 bytes are zero-padded into an 8-byte window so
     // fixed-width reads stay in bounds.
     if (src.len < 8) {
-        var buf: [8]u8 = .{ 0, 0, 0, 0, 0, 0, 0, 0 };
-        std.mem.copyForwards(u8, buf[0..src.len], src);
+        var buf: [8]u8 = @splat(0);
+        @memcpy(buf[0..src.len], src);
         var maxSv = max_sv_ptr.*;
         var tl: u8 = 0;
         const n = try readBody(normalized, &maxSv, &tl, &buf);
-        if (n > src.len) return error.Corruption; // FDBG2
+        if (n > src.len) return error.Corruption;
         max_sv_ptr.* = maxSv;
         table_log_ptr.* = tl;
         return n;
@@ -39,13 +39,13 @@ fn readBody(
     src: []const u8,
 ) errors.ZstdError!usize {
     const iend = src.len;
-    if (iend < 4) return error.InvalidFseTable; // FDBG3
+    if (iend < 4) return error.InvalidFseTable;
     @memset(normalized, 0);
 
     var ip: usize = 0;
     var bitStream: u32 = bits.readLe32(src[0..]);
     const tl: u8 = @intCast((bitStream & 0xF) + constants.min_fse_log);
-    if (tl > constants.max_fse_log or tl < constants.min_fse_log) return error.TableLogTooLarge; // FDBG4
+    if (tl > constants.max_fse_log or tl < constants.min_fse_log) return error.TableLogTooLarge;
     table_log_ptr.* = tl;
     bitStream >>= 4;
     var bitCount: u32 = 4;
@@ -124,7 +124,7 @@ fn readBody(
 
         if (remaining < threshold) {
             if (remaining <= 1) break;
-            nbBits = @as(u32, 31 - @clz(@as(u32, @intCast(remaining)))) + 1;
+            nbBits = std.math.log2_int(u32, @intCast(remaining)) + 1;
             threshold = @as(i32, 1) << @intCast(nbBits - 1);
         }
         if (charNum >= maxSv1) break;
@@ -141,13 +141,13 @@ fn readBody(
         bitStream = bits.readLe32(src[ip..]) >> @intCast(bitCount & 31);
     }
 
-    if (remaining != 1) return error.Corruption; // FDBG5
-    if (charNum > maxSv1) return error.MaxSymbolValueTooSmall; // FDBG6
-    if (bitCount > 32) return error.Corruption; // FDBG7
+    if (remaining != 1) return error.Corruption;
+    if (charNum > maxSv1) return error.MaxSymbolValueTooSmall;
+    if (bitCount > 32) return error.Corruption;
 
     max_sv_ptr.* = charNum - 1;
     ip += (bitCount + 7) >> 3;
-    if (ip > iend) return error.Corruption; // FDBG8
+    if (ip > iend) return error.Corruption;
     return ip;
 }
 test "readNCount accepts a header the encoder wrote" {

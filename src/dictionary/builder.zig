@@ -193,7 +193,7 @@ pub fn trainFromSamples(allocator: std.mem.Allocator, samples: []const []const u
             if (sample_idx >= samples.len * 2) break;
             continue;
         }
-        std.mem.copyForwards(u8, buf[pos .. pos + copy_len], s[0..copy_len]);
+        @memcpy(buf[pos .. pos + copy_len], s[0..copy_len]);
         pos += copy_len;
         sample_idx += 1;
     }
@@ -242,7 +242,7 @@ test "trainFastCover respects accel stride" {
     const alloc = testing.allocator;
     const unit = "abcdefgh";
     var sample_buf: [unit.len * 8]u8 = undefined;
-    for (0..8) |i| std.mem.copyForwards(u8, sample_buf[i * unit.len ..][0..unit.len], unit);
+    for (0..8) |i| @memcpy(sample_buf[i * unit.len ..][0..unit.len], unit);
     const samples = [_][]const u8{&sample_buf};
     var dict = try trainFastCoverImpl(alloc, &samples, .{ .dictSize = 64 }, 6, 16, 6, 2);
     defer dict.deinit();

@@ -5,9 +5,9 @@ description: Code examples for zstd.zig compression library.
 
 # Examples
 
-Practical examples showing how to use zstd.zig. All 20 examples live in `examples/` with `_` names and are run via `zig build run-<name>`.
+Practical examples showing how to use zstd.zig. All 21 examples live in `examples/` with `_` names and are run via `zig build run-<name>`.
 
-## All 20 Examples
+## All 21 Examples
 
 | Example | File | Description | Run Command |
 |---------|------|-------------|-------------|
@@ -30,6 +30,7 @@ Practical examples showing how to use zstd.zig. All 20 examples live in `example
 | `legacy_decompression` | `examples/legacy_decompression.zig` | Historic frame detection for v01-v07 and skippable frames | `zig build run-legacy_decompression` |
 | `file_compression` | `examples/file_compression.zig` | Real file compression, write to .zst archive, and decompression | `zig build run-file_compression` |
 | `explicit_io_streaming` | `examples/explicit_io_streaming.zig` | Chunked streaming file compression, decompression, and Encoder/Decoder contexts | `zig build run-explicit_io_streaming` |
+| `explicit_io_pipeline` | `examples/explicit_io_pipeline.zig` | Explicit std.Io Reader/Writer pipeline streaming and parallel threaded compression | `zig build run-explicit_io_pipeline` |
 | `large_file_compression` | `examples/large_file_compression.zig` | Multi-megabyte (4 MiB) compression, ratio inspection, and disk preservation | `zig build run-large_file_compression` |
 
 Run all at once:
@@ -61,9 +62,10 @@ and what the output means.
 | [Streaming Decompression](/examples/streaming_decompression) | `streaming_decompression.zig` | `StreamingDecompressor`, `needsMore` |
 | [Custom Allocator](/examples/custom_allocator) | `custom_allocator.zig` | A caller-supplied counting allocator |
 | [Error Handling](/examples/error_handling) | `error_handling.zig` | `PrefixUnknown`, `SrcSizeWrong`, `DstSizeTooSmall` |
-| [Legacy Decompression](/examples/legacy_decompression) | `legacy_decompression.zig` | Historic detection, v0.1-v0.5 decode, v0.6-v0.7 refusal |
+| [Legacy Decompression](/examples/legacy_decompression) | `legacy_decompression.zig` | Historic detection and complete native v0.1-v0.7 decode |
 | [File & Directory Compression](/examples/file_compression) | `file_compression.zig` | File and directory tree to `.zst` and back, with `std.Io.Dir` |
 | [Explicit IO Streaming](/examples/explicit_io_streaming) | `explicit_io_streaming.zig` | std.Io chunk streaming, StreamingCompressor, StreamingDecompressor, Encoder, Decoder |
+| [Explicit IO Pipeline](/examples/explicit_io_pipeline) | `explicit_io_pipeline.zig` | std.Io.Reader.fixed, std.Io.Writer.Allocating, bounded writer, and multithreading |
 | [Large File Compression](/examples/large_file_compression) | `large_file_compression.zig` | 4 MiB buffer compression, ratio, throughput, and disk preservation |
 
 ## Validate

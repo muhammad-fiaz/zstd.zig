@@ -136,7 +136,7 @@ pub fn writeFrameHeader(buf: []u8, contentSize: ?u64, windowSize: u64, dictId: u
     fhd |= (fcs_code << 6);
     if (!singleSegment) {
         const ws = if (windowSize == 0) @as(u64, 1) << @as(std.math.Log2Int(u64), @intCast(constants.window_log_limit_default)) else windowSize;
-        var windowLog: u8 = @intCast(@min(@as(u64, 63 - @clz(ws)), @as(u64, constants.window_log_max)));
+        var windowLog: u8 = @intCast(@min(std.math.log2_int(u64, ws), @as(u64, constants.window_log_max)));
         if (windowLog < constants.window_log_absolutemin) windowLog = constants.window_log_absolutemin;
         const wl_byte: u8 = @as(u8, (windowLog - constants.window_log_absolutemin) << 3);
         buf[pos] = fhd;
@@ -281,7 +281,7 @@ test "isSkippableFrame valid" {
     buf[5] = 0;
     buf[6] = 0;
     buf[7] = 0;
-    std.mem.copyForwards(u8, buf[8..13], "hello");
+    @memcpy(buf[8..13], "hello");
     try testing.expect(isSkippableFrame(buf[0..13]));
 }
 

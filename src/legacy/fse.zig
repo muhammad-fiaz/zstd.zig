@@ -239,9 +239,6 @@ pub const TableAndLog = struct {
 };
 // Tests
 const testing = std.testing;
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 pub const writeNCount = fse_compress.writeNCount;
 

@@ -233,13 +233,10 @@ pub const BlockHeader = struct {
 /// Reads one block header. `src` must hold at least `block_header_size` bytes.
 pub fn readBlockHeader(src: []const u8) errors.ZstdError!BlockHeader {
     if (src.len < block_header_size) return error.SrcSizeWrong;
-    const flags = src[0];
-    const size: usize = @as(usize, src[2]) |
-        (@as(usize, src[1]) << 8) |
-        (@as(usize, flags & 7) << 16);
+    const raw = std.mem.readInt(u24, src[0..3], .big);
     return .{
-        .block_type = @fromBackingInt(@intCast(@as(u2, @truncate(flags >> 6)))),
-        .size = size,
+        .block_type = @fromBackingInt(@as(u2, @truncate(raw >> 22))),
+        .size = raw & 0x07FFFF,
     };
 }
 
@@ -250,9 +247,8 @@ pub fn writeBlockHeader(dst: []u8, block_type: BlockType, size: usize) void {
     // The size field is 19 bits wide: three in the first byte, eight in each of
     // the other two.
     std.debug.assert(size <= 0x7FFFF);
-    dst[0] = (@as(u8, @backingInt(block_type)) << 6) | @as(u8, @intCast(size >> 16));
-    dst[1] = @truncate(size >> 8);
-    dst[2] = @truncate(size);
+    const raw: u24 = (@as(u24, @backingInt(block_type)) << 22) | @as(u24, @truncate(size & 0x07FFFF));
+    std.mem.writeInt(u24, dst[0..3], raw, .big);
 }
 
 pub const FrameHeader = struct {
@@ -369,8 +365,7 @@ pub fn readFrameHeader(version: Version, src: []const u8) errors.ZstdError!Frame
                 else => 8,
             };
             const window_size: usize = if (direct) 0 else 1;
-            var size = 5 + window_size + dict_id_size + fcs_size;
-            if (checksum) size += 4;
+            const size = 5 + window_size + dict_id_size + fcs_size;
             if (src.len < size) return error.SrcSizeWrong;
 
             var pos: usize = 5;

@@ -43,8 +43,6 @@ features:
 
 `zstd.zig` is a native Zig implementation of the Zstandard format and codec, built entirely from scratch in Zig.
 
-| | |
-|---|---|
-| **Reference** | [Zstandard project](https://github.com/Facebook/zstd) - format, behavior, compatibility, interoperability |
-| **Implementation** | Native Zig, written from scratch |
-| **Runtime dependency** | No upstream Zstandard implementation required |
+The [Zstandard project](https://github.com/facebook/zstd) is used as a reference for the Zstandard format, codec behavior, compatibility, and interoperability verification.
+
+This project does not depend on the upstream implementation.

@@ -12,11 +12,13 @@ There is no `CLevel` enum - compression levels are plain `i32`.
 Levels are `i32` in range `c_level_min = -131072` to `c_level_max = 22`, with `c_level_default = 3`. Helpers:
 
 ```zig
-pub fn minCLevel() i32     // -131072
-pub fn maxCLevel() i32     // 22
-pub fn defaultCLevel() i32 // 3
-pub fn versionString() []const u8 // "1.6.0"
-pub fn versionNumber() u32        // 10600
+pub fn minCLevel() i32                // -131072
+pub fn maxCLevel() i32                // 22
+pub fn defaultCLevel() i32            // 3
+pub fn versionString() []const u8     // "0.0.4"
+pub fn versionNumber() u32            // 4
+pub fn specVersionString() []const u8 // "1.6.0"
+pub fn specVersionNumber() u32        // 10600
 ```
 
 Use with `zstd.compressWithLevel` or `CompressionContext.initWithLevel`:

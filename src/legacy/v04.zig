@@ -104,12 +104,7 @@ test "v04: the encoder's frame decodes back to its input" {
 
         // The magic is this version's, and the frame header is five bytes with a
         // reserved high nibble of zero.
-        try testing.expectEqualSlices(u8, &[_]u8{
-            @truncate(magic),
-            @truncate(magic >> 8),
-            @truncate(magic >> 16),
-            @truncate(magic >> 24),
-        }, frame[0..4]);
+        try testing.expectEqual(magic, std.mem.readInt(u32, frame[0..4], .little));
         try testing.expectEqual(@as(u8, 0), frame[4] & 0xF0);
 
         const out = try testing.allocator.alloc(u8, src.len + 16);

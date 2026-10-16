@@ -9,8 +9,7 @@
 //! is written once, before any job starts, and the checksum once, after every
 //! job has finished. What one job must not do is inherit repeat-offset history
 //! from blocks it never encoded, so every job after the first starts with
-//! `RepHistory.invalidated`, the same guarantee upstream's
-//! `ZSTD_invalidateRepCodes` gives, which is what makes independently encoded
+//! `RepHistory.invalidated`, which ensures that independently encoded
 //! segments concatenate into one decodable frame.
 //!
 //! The caller supplies the allocator and the `std.Io` the pool's mutexes and
@@ -74,8 +73,8 @@ const Guarded = struct {
         self.child.rawFree(memory, alignment, ret_addr);
     }
 };
-/// The smallest input slice handed to one job, defaulting to upstream's
-/// `ZSTDMT_JOBSIZE_MIN`. A frame smaller than this (or one job per input, once
+/// The smallest input slice handed to one job.
+/// A frame smaller than this (or one job per input, once
 /// the job count is capped) compresses on the calling thread through the
 /// ordinary serial path, byte for byte.
 pub const job_size_min: usize = 512 * 1024;
@@ -83,7 +82,7 @@ pub const job_size_min: usize = 512 * 1024;
 /// free up, so a worker that finishes its split early takes the next one
 /// instead of the run ending on the slowest segment.
 const jobs_per_worker = 2;
-/// Upstream's `ZSTDMT_overlapLog` default per strategy: how much of the window
+/// Standard default overlap log per strategy: how much of the window
 /// a job loads as its prefix, as a fraction (`overlap = window >> (9 - value)`).
 fn overlapLogDefault(strategy: constants.Strategy) u8 {
     return switch (strategy) {
@@ -339,12 +338,10 @@ pub const MTCompressor = struct {
         var overlap: usize = 0;
 
         if (num_jobs > 1) {
-            // How much history each job loads, following upstream's
-            // `ZSTDMT_computeOverlapSize`: a fraction of the window the frame
+            // How much history each job loads: a fraction of the window the frame
             // keeps (`history_limit`), which is the distance the header itself
             // declares. With long-distance matching the window is routinely
-            // oversized, so the job size takes over as the base, as upstream
-            // does for the same reason.
+            // oversized, so the job size takes over as the base for the same reason.
 
             const window_log: u8 = @intCast(std.math.log2_int(usize, plan.history_limit));
 
@@ -358,9 +355,8 @@ pub const MTCompressor = struct {
             const ov_log: u8 = @min(base -| rlog, window_log);
             overlap = @as(usize, 1) << @intCast(ov_log);
             // A job must be at least its own overlap, or its prefix would be
-            // as large as the segment following it. Upstream grows the
-            // section size the same way; growing it here shrinks the job
-            // count, which stays within the cap.
+            // as large as the segment following it. Growing the section size
+            // here shrinks the job count, which stays within the cap.
             if (job_size < overlap) {
                 job_size = overlap;
                 num_jobs = std.math.divCeil(usize, src_len, job_size) catch 1;
@@ -559,7 +555,7 @@ test "mt: multi-job frames round trip at the split boundaries" {
         }
     }
 }
-test "mt: split planning follows the upstream floor and overlap mapping" {
+test "mt: split planning follows the configured floor and overlap mapping" {
     const alloc = testing.allocator;
     _ = alloc;
 

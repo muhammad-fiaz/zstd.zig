@@ -177,7 +177,7 @@ fn orderSymbols(counts: *const [256]u32, stats: Stats, scratch: *Scratch) void {
     }
     const order = CountOrder{ .counts = counts };
     std.mem.sort(u8, scratch.ascending[0..n], order, CountOrder.leastFrequentFirst);
-    std.mem.copyForwards(u8, scratch.descending[0..n], scratch.ascending[0..n]);
+    @memcpy(scratch.descending[0..n], scratch.ascending[0..n]);
     std.mem.sort(u8, scratch.descending[0..n], order, CountOrder.frequentFirst);
 }
 
@@ -255,7 +255,7 @@ fn lengthLimitedLengths(descending: []const u8, depth: u8, lengths: *[256]u8) u8
     for (descending) |s| {
         const left: u32 = @intCast(remaining - 1);
         const ceiling: u32 = @min(longest, capacity - left);
-        var term: u32 = @as(u32, 1) << @intCast(31 - @clz(ceiling));
+        var term: u32 = @as(u32, 1) << @as(std.math.Log2Int(u32), @intCast(std.math.log2_int(u32, ceiling)));
         while (term != 0) : (term >>= 1) {
             const rest = capacity - term;
             if (left <= rest and minTerms(rest, depth) <= left) break;
@@ -263,7 +263,7 @@ fn lengthLimitedLengths(descending: []const u8, depth: u8, lengths: *[256]u8) u8
         // Unreachable for a fillable state; kept so a logic error degrades to a
         // still-valid code rather than a panic in the middle of a frame.
         if (term == 0) term = 1;
-        const length: u8 = @intCast(depth - (31 - @clz(term)));
+        const length: u8 = @intCast(depth - std.math.log2_int(u32, term));
         lengths[s] = length;
         if (length > deepest) deepest = length;
         capacity -= term;
@@ -323,7 +323,7 @@ fn finalizeTable(table: *Table, stats: Stats) errors.ZstdError!void {
 /// A complete code needs one cell per leaf, so `2^depth >= cardinality`.
 pub fn minDepthFor(cardinality: u16) u8 {
     if (cardinality <= 2) return 1;
-    return @intCast(32 - @clz(@as(u32, cardinality) - 1));
+    return @intCast(std.math.log2_int(u32, @as(u32, cardinality) - 1) + 1);
 }
 
 /// Builds a complete code for `counts` with no code longer than `max_depth`.
@@ -508,12 +508,9 @@ pub fn compress4X(dst: []u8, src: []const u8, table: *const Table) errors.ZstdEr
         src_pos = ends[i];
         dst_pos += written;
     }
-    dst[0] = @truncate(sizes[0]);
-    dst[1] = @truncate(sizes[0] >> 8);
-    dst[2] = @truncate(sizes[1]);
-    dst[3] = @truncate(sizes[1] >> 8);
-    dst[4] = @truncate(sizes[2]);
-    dst[5] = @truncate(sizes[2] >> 8);
+    std.mem.writeInt(u16, dst[0..2], @intCast(sizes[0]), .little);
+    std.mem.writeInt(u16, dst[2..4], @intCast(sizes[1]), .little);
+    std.mem.writeInt(u16, dst[4..6], @intCast(sizes[2]), .little);
     return dst_pos;
 }
 
@@ -546,26 +543,24 @@ pub fn compressPayload(
 }
 
 fn writeLE24(dst: []u8, value: u32) void {
-    dst[0] = @truncate(value);
-    dst[1] = @truncate(value >> 8);
-    dst[2] = @truncate(value >> 16);
+    std.mem.writeInt(u24, dst[0..3], @truncate(value), .little);
 }
 
 fn writeRawSection(out: []u8, src: []const u8) usize {
     const n: u32 = @intCast(src.len);
     if (n < 32) {
         out[0] = @truncate(n << 3);
-        std.mem.copyForwards(u8, out[1 .. 1 + src.len], src);
+        @memcpy(out[1 .. 1 + src.len], src);
         return 1 + src.len;
     }
     if (n < 4096) {
         out[0] = @truncate(0x04 | ((n & 0xF) << 4));
         out[1] = @truncate(n >> 4);
-        std.mem.copyForwards(u8, out[2 .. 2 + src.len], src);
+        @memcpy(out[2 .. 2 + src.len], src);
         return 2 + src.len;
     }
     writeLE24(out, 0x0C | (n << 4));
-    std.mem.copyForwards(u8, out[3 .. 3 + src.len], src);
+    @memcpy(out[3 .. 3 + src.len], src);
     return 3 + src.len;
 }
 
@@ -578,8 +573,7 @@ fn writeRleSection(out: []u8, src: []const u8) usize {
     }
     if (n < 4096) {
         const v: u16 = @intCast(1 | (1 << 2) | (n << 4));
-        out[0] = @truncate(v);
-        out[1] = @truncate(v >> 8);
+        std.mem.writeInt(u16, out[0..2], v, .little);
         out[2] = src[0];
         return 3;
     }
@@ -730,7 +724,7 @@ fn decodeLiteralsSection(
             if (regen > out.len) return error.Corruption;
             if (mode == .raw) {
                 if (off + regen > src.len) return error.Corruption;
-                std.mem.copyForwards(u8, out[0..regen], src[off .. off + regen]);
+                @memcpy(out[0..regen], src[off .. off + regen]);
             } else {
                 // An RLE section stores one byte, not `regen` of them.
                 if (off >= src.len) return error.Corruption;

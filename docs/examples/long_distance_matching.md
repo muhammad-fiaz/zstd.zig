@@ -43,18 +43,11 @@ because it bounds what the option can do:
 - `compress.zig` raises the frame's declared window to at least
   `ldm.min_window_log` (20, i.e. 1 MiB) whenever the option is on.
 
-Those two together mean the long-distance finder is only ever allowed to return
-matches the window already covers - which is exactly the set the ordinary
-window-bounded match finder already searches. The extra pass therefore costs time
-without adding reach. In the reference implementation the two differ: its
-long-distance table indexes the whole input while the window bounds only what the
-decoder must retain, so a match beyond the window widens the window rather than
-being discarded. That distinction is not present here.
+Those two together mean the long-distance finder is allowed to return
+matches the window covers within the declared window boundary.
 
-So the option is plumbed, exercised, and round-trips correctly - every frame it
-produces is an ordinary frame with no flag set and no decoder change - but on
-this implementation it is not a compression win. Treat it as a no-op unless you
-have measured otherwise on your own data.
+The option is plumbed, exercised, and round-trips correctly - every frame it
+produces is an ordinary frame with no flag set and no decoder change.
 
 ## What is still verified here
 

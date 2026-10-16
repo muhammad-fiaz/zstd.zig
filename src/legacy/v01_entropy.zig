@@ -344,7 +344,7 @@ pub fn readSeqHeader(src: []const u8) !struct { header: SeqHeader, read: usize }
     var pos: usize = 3;
     const dumps_length: usize = if (selectors & 2 != 0) blk: {
         if (pos + 2 > src.len) return error.Corruption;
-        const value = @as(usize, src[pos]) | (@as(usize, src[pos + 1]) << 8);
+        const value = std.mem.readInt(u16, src[pos..][0..2], .little);
         pos += 2;
         break :blk value;
     } else blk: {
@@ -496,9 +496,8 @@ fn advanceEntry(ds: *bitstream.BIT_DStream, entry: dtable.Entry) u16 {
     return entry.newState +% @as(u16, @truncate(ds.readBits(entry.nbBits)));
 }
 const testing = std.testing;
-// ---------------------------------------------------------------------------
+
 // Sequences
-// ---------------------------------------------------------------------------
 
 /// Diagnostic view of the decoded Huffman weights, for locating whether a bad
 /// literal decode comes from the weights or from the decode loop itself.

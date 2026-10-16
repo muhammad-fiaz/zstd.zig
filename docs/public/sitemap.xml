@@ -46,12 +46,12 @@
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://muhammad-fiaz.github.io/zstd.zig/api/compress-options</loc>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/api/clevel</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://muhammad-fiaz.github.io/zstd.zig/api/decompress-options</loc>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/api/compress-options</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
@@ -61,7 +61,32 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/api/constants</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/api/decompress-options</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://muhammad-fiaz.github.io/zstd.zig/api/decompressor</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/api/dict</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/api/errors</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/api/frame</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
@@ -75,31 +100,6 @@
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
-  <url>
-    <loc>https://muhammad-fiaz.github.io/zstd.zig/api/dict</loc>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://muhammad-fiaz.github.io/zstd.zig/api/frame</loc>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://muhammad-fiaz.github.io/zstd.zig/api/clevel</loc>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://muhammad-fiaz.github.io/zstd.zig/api/constants</loc>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://muhammad-fiaz.github.io/zstd.zig/api/errors</loc>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-  </url>
 
   <!-- Examples -->
   <url>
@@ -108,22 +108,107 @@
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/basic</loc>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/basic_compression</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/streaming</loc>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/custom_level</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/dictionary</loc>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/advanced_params</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/frame</loc>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/custom_strategy</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/compression_bound</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/window_limit</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/frame_iteration</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/long_distance_matching</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/parallel_compression</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/dictionary_compression</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/dictionary_training</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/prepared_dictionary</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/streaming_compression</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/streaming_decompression</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/custom_allocator</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/error_handling</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/legacy_decompression</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/file_compression</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/explicit_io_streaming</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/explicit_io_pipeline</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://muhammad-fiaz.github.io/zstd.zig/examples/large_file_compression</loc>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>

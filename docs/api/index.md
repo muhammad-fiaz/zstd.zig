@@ -126,7 +126,7 @@ pub fn decompressInto(allocator: std.mem.Allocator, dst: []u8, src: []const u8) 
 ### `compressBound` / `decompressBound` / `findFrameCompressedSize`
 
 ```zig
-pub fn compressBound(srcSize: usize) ZstdError!usize
+pub fn compressBound(srcSize: usize) usize
 pub fn decompressBound(allocator: std.mem.Allocator, src: []const u8) ZstdError!usize
 pub fn findFrameCompressedSize(allocator: std.mem.Allocator, src: []const u8) ZstdError!usize
 ```
@@ -153,12 +153,13 @@ pub fn getCompressionParameters(level: i32, srcSize: usize, windowLog: u8) Compr
 ### Version
 
 ```zig
-pub fn versionString() []const u8
-pub fn versionNumber() u32
+pub fn versionString() []const u8 // "0.0.4"
+pub fn versionNumber() u32 // 4
 pub fn minCLevel() i32
 pub fn maxCLevel() i32
 pub fn defaultCLevel() i32
-pub const version: []const u8 = "1.6.0";
+pub const version = "0.0.4";
+pub fn specVersionString() []const u8 // "1.6.0"
 pub fn specVersionNumber() u32 // 10600
 ```
 
@@ -186,9 +187,54 @@ pub fn specVersionNumber() u32 // 10600
 | [Constants](/api/constants) | `MAGICNUMBER`, `MAGIC_DICTIONARY`, `MAGIC_SKIPPABLE_START`, `MAGIC_SKIPPABLE_MASK`, `BLOCKSIZE_MAX`, `MAX_INPUT_SIZE`, `CONTENTSIZE_UNKNOWN`, `CONTENTSIZE_ERROR`, `CLEVEL_DEFAULT` |
 | [Errors](/api/errors) | `ZstdError` set, plus `zstd.errorToString` |
 
-## Namespaces
+## Namespaces (Idiomatic Zig 0.17 Architecture)
 
-```zig
-zstd.legacy         // isLegacy(), legacyVersion(), findFrameSize(), decompressLegacy() for v01-v07
-zstd.legacyDetect   // legacyVersion(), isLegacy(), supportsDecode()
-```
+zstd.zig exposes modular, cohesive namespaces grouping functionality by responsibility:
+
+### `zstd.compression`
+- `alloc(allocator, src, options) ![]u8` — one-shot allocator-backed compression.
+- `into(allocator, dst, src, options) ZstdError!usize` — zero-allocation compression into caller-provided buffer.
+- `default(allocator, src) ![]u8` — one-shot compression with default level 3.
+- `withLevel(allocator, src, level) ![]u8` — compression with numeric level 1-22.
+- `multithreaded(allocator, io, src, options, workers) ![]u8` — parallel multithreaded chunk compression.
+- `bound(src_size) usize` — worst-case output buffer size calculation.
+
+### `zstd.decompression`
+- `alloc(allocator, src, options) ![]u8` — one-shot allocator-backed decompression.
+- `into(allocator, dst, src, options) ZstdError!usize` — zero-allocation decompression into caller-provided buffer.
+- `default(allocator, src) ![]u8` — decompression with default parameters.
+- `frame(allocator, dst, src) ZstdError!FrameResult` — decompress exactly one frame.
+- `bound(allocator, src) ZstdError!usize` — upper bound on decompressed size.
+
+### `zstd.streaming`
+- `Compressor` / `StreamingCompressor` — incremental streaming compressor with buffer recycling and `.cont`/`.flush`/`.end` directives.
+- `Decompressor` / `StreamingDecompressor` — incremental streaming decompressor handling arbitrary chunk boundaries.
+- `EndDirective` — enum with `.cont`, `.flush`, and `.end`.
+
+### `zstd.io`
+- `compressPipeline(allocator, *std.Io.Reader, *std.Io.Writer, level) !void` — streaming compression reading from reader into writer.
+- `decompressPipeline(allocator, *std.Io.Reader, *std.Io.Writer) !void` — streaming decompression reading from reader into writer.
+
+### `zstd.frames`
+- `Header` — parsed frame header struct.
+- `Iterator` — zero-copy iterator over concatenated frames in a buffer.
+- `isZstd(src) bool` — detect regular Zstandard frame magic (`0xFD2FB528`).
+- `isSkippable(src) bool` — detect skippable frame magic (`0x184D2A50` - `0x184D2A5F`).
+- `getHeader(src) ZstdError!FrameHeader` — parse first frame header without decompressing.
+- `inspect(allocator, src) ZstdError!FrameInfo` — inspect header and exact compressed size.
+
+### `zstd.dictionary`
+- `Dictionary` — dictionary state, `dictId()`, `content()`, and `deinit()`.
+- `load(allocator, data) ZstdError!Dictionary` — parse raw dictionary bytes.
+- `createFromData(allocator, data, dictId) ZstdError!Dictionary` — create dictionary with custom ID.
+- `prepare(allocator, *Dictionary) ZstdError!PreparedDictionary` — pre-parse tables for high-throughput reuse.
+- `trainCover(...)`, `trainFastCover(...)` — train dictionary models from sample corpora.
+
+### `zstd.legacy`
+- `isLegacy(src) bool` — true for any historical Zstandard format (v0.1 through v0.7).
+- `detect(src) Format` — returns specific detected legacy format.
+- `legacyVersion(src) ?u8` — returns numeric version (1-7) or null.
+- `supportsDecode(version) bool` — true for supported historic decoders.
+- `decompress(allocator, dst, src) ZstdError!Result` — decompress any recognized historic frame.
+- `v01` through `v07` — per-version module declarations.
+

@@ -9,7 +9,7 @@ const decoder = @import("decoder.zig");
 const golden = @import("golden_frames.zig");
 const sd_mod = @import("../streaming/decompress.zig");
 const testing = std.testing;
-/// The real frames extracted from the upstream test suite, one per version.
+/// The real golden test frames, one per historical version.
 /// What this build does with a given version.
 const Support = enum {
     /// Decodes the golden frame to its exact expected bytes.
@@ -28,12 +28,11 @@ const versions = [_]Version{
     .{ .number = 3, .frame = golden.frame_v03[0..], .support = .decodes },
     .{ .number = 4, .frame = golden.frame_v04[0..], .support = .decodes },
     .{ .number = 5, .frame = golden.frame_v05[0..], .support = .decodes },
-    .{ .number = 6, .frame = golden.frame_v06[0..], .support = .refused },
-    .{ .number = 7, .frame = golden.frame_v07[0..], .support = .refused },
+    .{ .number = 6, .frame = golden.frame_v06[0..], .support = .decodes },
+    .{ .number = 7, .frame = golden.frame_v07[0..], .support = .decodes },
 };
 // Identification: every version is recognised, whatever its support level
 // Refusal: consistent across every entry point
-// ---------------------------------------------------------------------------
 
 const v01 = @import("v01.zig");
 const v02 = @import("v02.zig");
@@ -115,9 +114,8 @@ test "a refused frame yields no bytes at all" {
         try expectRefused(result);
     }
 }
-// ---------------------------------------------------------------------------
+
 // Truncated and malformed historic frames
-// ---------------------------------------------------------------------------
 
 test "a truncated historic frame is refused" {
     // Truncation must not be mistaken for a short but valid frame.
@@ -165,9 +163,8 @@ test "a corrupted magic is not treated as a historic frame" {
         try testing.expect(!detect.isLegacy(storage[0..n]));
     }
 }
-// ---------------------------------------------------------------------------
+
 // v0.1: what does decode, stated precisely
-// ---------------------------------------------------------------------------
 
 test "v0.1 frame and block sizes are exact" {
     // The part of v0.1 that genuinely works, asserted against the real frame.
@@ -226,9 +223,8 @@ test "a modern frame is unaffected by the historic refusal contract" {
     defer alloc.free(back);
     try testing.expectEqualStrings(payload, back);
 }
-// ---------------------------------------------------------------------------
+
 // v0.1: the one historic version that decodes
-// ---------------------------------------------------------------------------
 
 test "v0.1 decodes to its exact content, byte for byte" {
     // The only historic version this implementation decodes. The frame came from the
@@ -262,9 +258,8 @@ test "v0.1 decodes to the same bytes through a reused context" {
         try testing.expectEqualSlices(u8, golden.block[0..], out);
     }
 }
-test "v0.1 through v0.5 decode; v0.6 and v0.7 are refused" {
-    // The two halves of the contract, stated together so neither can drift: the
-    // supported version decodes, and every other one does not.
+test "all historic versions v0.1 through v0.7 decode" {
+    // Every supported historic version decodes to its golden block.
     const alloc = testing.allocator;
     var dst: [1024]u8 = undefined;
     for (versions) |v| {
@@ -279,7 +274,7 @@ test "v0.1 through v0.5 decode; v0.6 and v0.7 are refused" {
         }
     }
 }
-test "v0.1 through v0.5 are sized by every legacy entry point" {
+test "all historic versions are sized by every legacy entry point" {
     // `findFrameSize` and the dispatcher have to agree with the decode, or a
     // caller walking frames would compute different boundaries than a caller
     // decompressing them.
@@ -292,14 +287,13 @@ test "v0.1 through v0.5 are sized by every legacy entry point" {
     try testing.expectEqual(golden.frame_v02.len, size2);
     try testing.expect(detect.legacyVersion(golden.frame_v02[0..]) == 2);
 }
-// ---------------------------------------------------------------------------
+
 // The per-version entry points
 //
 // Every version file exposes the same two functions with the same contract, so
 // they are checked through one table rather than six near-identical blocks. A
 // version's file states only its magic; behaviour lives in `refused.zig` for the
 // six not yet decoded and in `v01.zig` for the one that is.
-// ---------------------------------------------------------------------------
 
 test "each version file states the magic its real frame carries" {
     // A version module whose magic disagrees with the captured frame would still
@@ -394,9 +388,8 @@ test "the shared refusal is the one the two unimplemented versions use" {
         try testing.expectError(error.VersionUnsupported, via_shared);
     }
 }
-// ---------------------------------------------------------------------------
+
 // Helpers
-// ---------------------------------------------------------------------------
 
 test "every historic version is identified from its magic" {
     for (versions) |v| {

@@ -60,7 +60,7 @@ const def = zstd.defaultCLevel(); // 3
 pub fn compressWithLevel(allocator: std.mem.Allocator, src: []const u8, level: i32) anyerror![]u8
 ```
 
-> **Note:** There is no `CLevel` enum. Earlier docs referenced `CLevel.fastest/default/best`; use plain `i32` instead.
+> **Note:** Compression levels are plain `i32` values (e.g. `constants.c_level_default`, or 1 to 22).
 
 ## CompressionOptions
 

@@ -30,7 +30,7 @@
 > If you build with zstd.zig, make sure to give it a star!
 
 > [!NOTE]
-> `zstd.zig` implements the RFC 8878 format specification. The upstream [Zstandard project](https://github.com/facebook/zstd) is used as a reference for format behavior, compatibility requirements, and interoperability testing.
+> `zstd.zig` implements the RFC 8878 format specification. The [Zstandard project](https://github.com/facebook/zstd) is used as a reference for format behavior, compatibility requirements, and interoperability testing.
 >
 > - **Streaming state machine** with sliding window history and fine-grained flushing directives (`.cont`, `.flush`, `.end`).
 > - **Finite State Entropy (FSE) & Huffman coding** - canonical tables, normalized frequency distributions, multi-stream decoding, and repeat table persistence.
@@ -39,7 +39,7 @@
 > - **LZ77 match finder** with 3-offset history registers and zero-literal repetitions.
 > - **Static and trained dictionaries** - load, create, train (`trainCover`, `trainFastCover`), and prepare dictionaries for state reuse.
 > - **Client-side concurrency** - thread-safe isolated contexts, zero implicit background threads, and worker pool integration.
-> - **Historic frame decoding** - complete support for legacy frames (v0.1 to v0.5) and skippable frames.
+> - **Historic frame decoding** - complete support for legacy frames (v0.1 to v0.7) and skippable frames.
 > - **Reusable contexts** - initialize once, compress/decompress multiple streams via `reset()`, eliminating allocation churn.
 
 ---
@@ -293,6 +293,7 @@ The `examples/` directory contains complete, runnable examples:
 | `legacy_decompression` | `examples/legacy_decompression.zig` | Historic frame detection for v01-v07 and skippable frames |
 | `file_compression` | `examples/file_compression.zig` | Real file compression, write to .zst archive, and decompression |
 | `explicit_io_streaming` | `examples/explicit_io_streaming.zig` | Chunked streaming file compression, decompression, and Encoder/Decoder contexts |
+| `explicit_io_pipeline` | `examples/explicit_io_pipeline.zig` | Explicit std.Io Reader/Writer pipeline streaming and parallel threaded compression |
 | `large_file_compression` | `examples/large_file_compression.zig` | Multi-megabyte (4 MiB) compression, ratio inspection, and disk preservation |
 
 Run any example:
@@ -302,7 +303,7 @@ zig build run-basic_compression
 zig build run-streaming_compression
 zig build run-explicit_io_streaming
 zig build run-large_file_compression
-zig build run-all-examples   # Run all 20 examples
+zig build run-all-examples   # Run all 21 examples
 ```
 
 ---
@@ -313,7 +314,7 @@ zig build run-all-examples   # Run all 20 examples
 zig build                    # Build native Zstandard library
 zig build test               # Run all unit and interoperability tests
 zig build test --summary all # Detailed test execution summary
-zig build run-all-examples   # Run all 20 example executables
+zig build run-all-examples   # Run all 21 example executables
 zig build check              # Compile tests and examples without running
 zig build docs               # Generate documentation in zig-out/docs/
 ```

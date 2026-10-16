@@ -54,7 +54,7 @@ pub fn decompressBlockLimits(
         .raw => {
             if (cSize > dst.len) return error.DstSizeTooSmall;
             if (src.len < 3 + cSize) return error.SrcSizeWrong;
-            std.mem.copyForwards(u8, dst[0..cSize], src[3 .. 3 + cSize]);
+            @memcpy(dst[0..cSize], src[3 .. 3 + cSize]);
             return cSize;
         },
         .rle => {
@@ -87,7 +87,7 @@ fn decompressCompressedBlock(
     if (lit.bytes_read >= src.len) {
         // No sequences section.
         if (lit.section.data.len > dst.len) return error.DstSizeTooSmall;
-        std.mem.copyForwards(u8, dst[0..lit.section.data.len], lit.section.data);
+        @memcpy(dst[0..lit.section.data.len], lit.section.data);
         return lit.section.data.len;
     }
 
@@ -170,7 +170,7 @@ test "raw block passes through" {
     const block_header_mod = @import("../frame/block.zig");
     var src: [8]u8 = undefined;
     block_header_mod.writeBlockHeader(src[0..3], true, .raw, 5);
-    std.mem.copyForwards(u8, src[3..8], "hello");
+    @memcpy(src[3..8], "hello");
     var state = entropy_mod.State.init(testing.allocator);
     defer state.deinit();
     var dst: [8]u8 = undefined;

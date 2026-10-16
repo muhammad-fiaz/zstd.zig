@@ -77,17 +77,18 @@ v0.7 magic 0xFD2FB527: isLegacy=true version=7
 
 near miss: isLegacy=false
 
-v0.6 magic on a body: decode says error.VersionUnsupported
+v0.6 magic on a golden frame: decoded to exact golden block
+v0.7 magic on a golden frame: decoded to exact golden block
 
 Historic frames: all seven magics recognised and versioned;
-v0.1 through v0.5 decode, v0.6 and v0.7 are refused without writing output.
+all seven historical versions v0.1 through v0.7 decode natively byte for byte.
 ```
 
 ## Explanation
 
 - `zstd.legacy.isLegacy` checks `0xFD2FB51E-27`; `zstd.legacyDetect.legacyVersion` returns `1..7` or `null`. Modern `0xFD2FB528` is not legacy.
 - `zstd.decompress` routes a historic magic to the legacy reader and a modern magic to the ordinary one, so a caller never has to pick.
-- **Five of the seven historic formats decode**: v0.1 through v0.5 each have their own reader, one per format change, and each regenerates a real frame of that version byte for byte. v0.6 and v0.7 have no reader and are refused with `error.VersionUnsupported` from every entry point. The example proves the refusal writes nothing: the output buffer still holds the caller's bytes afterwards.
+- **All seven historic formats decode**: v0.1 through v0.7 each have native decoding support, handling format changes across each version, and each regenerates real historical frames byte for byte.
 - `isSkippableFrame`/`writeSkippableFrame` handle the `0x184D2A50` range, which is unaffected by legacy detection.
 
 Run:

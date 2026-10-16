@@ -21,15 +21,14 @@ pub const ChecksumState = struct {
     }
 };
 
+const std = @import("std");
+
 pub fn writeChecksum(buf: []u8, checksum: u32) void {
-    buf[0] = @truncate(checksum);
-    buf[1] = @truncate(checksum >> 8);
-    buf[2] = @truncate(checksum >> 16);
-    buf[3] = @truncate(checksum >> 24);
+    std.mem.writeInt(u32, buf[0..4], checksum, .little);
 }
 
 pub fn readChecksum(src: []const u8) u32 {
-    return @as(u32, src[0]) | (@as(u32, src[1]) << 8) | (@as(u32, src[2]) << 16) | (@as(u32, src[3]) << 24);
+    return std.mem.readInt(u32, src[0..4], .little);
 }
 
 const testing = @import("std").testing;
