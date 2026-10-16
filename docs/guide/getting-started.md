@@ -25,7 +25,7 @@ Add zstd.zig to your `build.zig.zon`:
 
 ```zig
 .zstd = .{
-    .url = "https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.4.tar.gz",
+    .url = "https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.5.tar.gz",
     .hash = "...",  // use zig fetch --save to get the hash
 },
 ```

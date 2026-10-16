@@ -59,10 +59,10 @@ if (zstd.getFrameContentSize(data) == zstd.CONTENTSIZE_UNKNOWN) { /* ... */ }
 ## Version Functions and Constants
 
 ```zig
-pub const version: []const u8 = "0.0.4";
+pub const version: []const u8 = "0.0.5";
 
-pub fn versionString() []const u8     // "0.0.4"
-pub fn versionNumber() u32            // 4
+pub fn versionString() []const u8     // "0.0.5"
+pub fn versionNumber() u32            // 5
 pub fn specVersionString() []const u8 // "1.6.0"
 pub fn specVersionNumber() u32        // 10600
 pub fn minCLevel() i32                // -131072
@@ -80,9 +80,9 @@ std.debug.print("Default level: {d}\n", .{zstd.defaultCLevel()});
 
 | Constant | Value | Description |
 |----------|-------|-------------|
-| `zstd.version` | `"0.0.4"` | This library's release version, as a comptime string |
-| `zstd.versionString()` | `"0.0.4"` | The same string, as a function |
-| `zstd.versionNumber()` | `4` | `major*100*100 + minor*100 + patch` for `0.0.4` |
+| `zstd.version` | `"0.0.5"` | This library's release version, as a comptime string |
+| `zstd.versionString()` | `"0.0.5"` | The same string, as a function |
+| `zstd.versionNumber()` | `5` | `major*100*100 + minor*100 + patch` for `0.0.5` |
 | `zstd.specVersionString()` | `"1.6.0"` | Zstandard format specification implemented |
 | `zstd.specVersionNumber()` | `10600` | `major*100*100 + minor*100 + patch` for `1.6.0` |
 

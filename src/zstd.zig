@@ -1,7 +1,7 @@
-/// zstd.zig 0.0.4, implementing Zstandard v1.6.0 on Zig 0.17.
+/// zstd.zig 0.0.5, implementing Zstandard v1.6.0 on Zig 0.17.
 /// The caller supplies the allocator. Compression defaults to single-threaded;
 /// worker threads are strictly opt-in via options.workers or MTCompressor.
-pub const version = "0.0.4";
+pub const version = "0.0.5";
 /// Data-format specification implemented (Zstandard v1.6.0).
 const std = @import("std");
 const builtin = @import("builtin");
@@ -82,7 +82,7 @@ comptime {
     _ = @import("legacy/layouts.zig");
     _ = @import("legacy/sequences.zig");
     _ = @import("legacy/detect.zig");
-    _ = @import("legacy/v01_entropy.zig");
+    _ = @import("legacy/entropy.zig");
     _ = @import("legacy/v01.zig");
     _ = @import("legacy/v02.zig");
     _ = @import("legacy/v03.zig");
@@ -638,13 +638,13 @@ pub fn readSkippableFrame(dst: []u8, src: []const u8) ZstdError!usize {
     @memcpy(dst[0..size], src[8 .. 8 + size]);
     return size;
 }
-/// Library version string ("0.0.4").
+/// Library version string ("0.0.5").
 pub fn versionString() []const u8 {
     return version;
 }
 /// Library version as major*100*100 + minor*100 + patch.
 pub fn versionNumber() u32 {
-    return 4;
+    return 5;
 }
 /// Data-format specification version string ("1.6.0").
 pub fn specVersionString() []const u8 {
@@ -2939,8 +2939,8 @@ test "skippable read wrong magic" {
     try testing.expectError(error.PrefixUnknown, result);
 }
 test "version info" {
-    try testing.expectEqualStrings("0.0.4", versionString());
-    try testing.expectEqual(@as(u32, 4), versionNumber());
+    try testing.expectEqualStrings("0.0.5", versionString());
+    try testing.expectEqual(@as(u32, 5), versionNumber());
     try testing.expectEqualStrings("1.6.0", specVersionString());
     try testing.expectEqual(@as(u32, 1 * 100 * 100 + 6 * 100), specVersionNumber());
     try testing.expect(maxCLevel() == 22);

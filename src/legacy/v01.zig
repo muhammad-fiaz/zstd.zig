@@ -2,7 +2,7 @@ const std = @import("std");
 const bits = @import("../common/bits.zig");
 const errors = @import("../common/errors.zig");
 const decoder = @import("decoder.zig");
-const v01_entropy = @import("v01_entropy.zig");
+const entropy = @import("entropy.zig");
 
 /// A block's regenerated output never exceeds the block size cap.
 const max_block_output: usize = 128 * 1024;
@@ -154,7 +154,7 @@ fn decompressCompressed(
             const high_bits: usize = (block[0] >> 3) & 7;
             lit_size = (high_bits << 16) | (@as(usize, payload[0]) << 8) | payload[1];
             if (lit_size > max_block_output or lit_header.payload < 2) return error.Corruption;
-            const ok = v01_entropy.decompressLiterals(allocator, scratch[0..lit_size], payload[2..]) catch |e| {
+            const ok = entropy.decompressLiterals(allocator, scratch[0..lit_size], payload[2..]) catch |e| {
                 return e;
             };
             if (ok.written != lit_size) return error.Corruption;
@@ -167,7 +167,7 @@ fn decompressCompressed(
     // exactly the block's output: every literal is either consumed by a
     // sequence's literal run or emitted as the trailing run, and every match
     // contributes its own bytes.
-    const decoded = v01_entropy.decodeSequences(allocator, block[lit_pos..]) catch |e| return e;
+    const decoded = entropy.decodeSequences(allocator, block[lit_pos..]) catch |e| return e;
     defer allocator.free(decoded.sequences);
     {
         // Only a bound: it says the total must fit, which is a real check because a

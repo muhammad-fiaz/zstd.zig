@@ -16,7 +16,7 @@ description: How to install and set up zstd.zig in your Zig project.
 - Supported architectures: x86_64, aarch64, x86
 
 ::: warning Version Requirement
-This library targets the new **Zig 0.17.0** release and standard library APIs (`std.Io`, language builtins, etc.). **Zig 0.16.0 is not supported** in this release (`v0.0.4+`). If your project is still on Zig 0.16.0, please use library version **0.0.3** (the previous stable release).
+This library targets the new **Zig 0.17.0** release and standard library APIs (`std.Io`, language builtins, etc.). **Zig 0.16.0 is not supported** in this release (`v0.0.5+`). If your project is still on Zig 0.16.0, please use library version **0.0.3** (the previous stable release).
 :::
 
 ## Setup
@@ -24,21 +24,21 @@ This library targets the new **Zig 0.17.0** release and standard library APIs (`
 ### Method 1: Zig Fetch (Recommended) - Latest Release (Zig 0.17.0)
 
 ```bash
-zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.4.tar.gz
+zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.5.tar.gz
 ```
 
-This corresponds to `build.zig.zon` version `0.0.4`:
+This corresponds to `build.zig.zon` version `0.0.5`:
 
 ```zig
 .{
     .name = .zstd,
-    .version = "0.0.4",
+    .version = "0.0.5",
     .minimum_zig_version = "0.17.0",
     // ...
 }
 ```
 
-> **On Zig 0.16?** Zig 0.16.0 is not supported in `v0.0.4+`. Fetch the previous stable release instead:
+> **On Zig 0.16?** Zig 0.16.0 is not supported in `v0.0.5+`. Fetch the previous stable release instead:
 >
 > ```bash
 > zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.3.tar.gz
@@ -59,7 +59,7 @@ Add the dependency to your `build.zig.zon`:
 ```zig
 .dependencies = .{
     .zstd = .{
-        .url = "https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.4.tar.gz",
+        .url = "https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.5.tar.gz",
         .hash = "...", // Run `zig fetch --save <url>` to generate the hash.
     },
 },

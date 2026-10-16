@@ -15,8 +15,8 @@ Levels are `i32` in range `c_level_min = -131072` to `c_level_max = 22`, with `c
 pub fn minCLevel() i32                // -131072
 pub fn maxCLevel() i32                // 22
 pub fn defaultCLevel() i32            // 3
-pub fn versionString() []const u8     // "0.0.4"
-pub fn versionNumber() u32            // 4
+pub fn versionString() []const u8     // "0.0.5"
+pub fn versionNumber() u32            // 5
 pub fn specVersionString() []const u8 // "1.6.0"
 pub fn specVersionNumber() u32        // 10600
 ```

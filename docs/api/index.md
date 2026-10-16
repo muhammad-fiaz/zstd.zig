@@ -153,12 +153,12 @@ pub fn getCompressionParameters(level: i32, srcSize: usize, windowLog: u8) Compr
 ### Version
 
 ```zig
-pub fn versionString() []const u8 // "0.0.4"
-pub fn versionNumber() u32 // 4
+pub fn versionString() []const u8 // "0.0.5"
+pub fn versionNumber() u32 // 5
 pub fn minCLevel() i32
 pub fn maxCLevel() i32
 pub fn defaultCLevel() i32
-pub const version = "0.0.4";
+pub const version = "0.0.5";
 pub fn specVersionString() []const u8 // "1.6.0"
 pub fn specVersionNumber() u32 // 10600
 ```
