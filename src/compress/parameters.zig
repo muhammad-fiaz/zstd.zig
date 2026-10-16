@@ -146,11 +146,11 @@ pub fn getParams(level: i32, src_size: usize, dictSize: usize) CompressionParame
     }
 
     if (src_size > 0 and src_size <= (@as(usize, 1) << (constants.window_log_max - 1))) {
-        const tSize = src_size + dictSize;
+        const tSize: u64 = @as(u64, src_size) + dictSize;
         const srcLog: u8 = if (tSize < (1 << constants.hash_log_min))
             constants.hash_log_min
         else
-            @intCast(64 - @clz(tSize - 1));
+            @as(u8, @intCast(64 - @clz(tSize - 1)));
         if (cp.windowLog > srcLog) cp.windowLog = srcLog;
     }
     if (cp.windowLog < constants.window_log_absolutemin) {

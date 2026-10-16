@@ -538,9 +538,9 @@ fn decodeSequences(
 
     // Reverse bitstream
     var ds = BIT_DStream.init(src[pos..]) catch return error.Corruption;
-    var st_ll = ds.readBits(ll_table.log);
-    var st_of = ds.readBits(of_table.log);
-    var st_ml = ds.readBits(ml_table.log);
+    var st_ll: usize = @intCast(ds.readBits(ll_table.log));
+    var st_of: usize = @intCast(ds.readBits(of_table.log));
+    var st_ml: usize = @intCast(ds.readBits(ml_table.log));
     if (ds.reload() == .overflow) return error.Corruption;
 
     var outPos: usize = out_start;
