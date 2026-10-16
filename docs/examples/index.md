@@ -18,7 +18,7 @@ Practical examples showing how to use zstd.zig. All 21 examples live in `example
 | `compression_bound` | `examples/compression_bound.zig` | Sizing an output buffer with `compressBound` | `zig build run-compression_bound` |
 | `window_limit` | `examples/window_limit.zig` | Bounding the declared window a decoder accepts | `zig build run-window_limit` |
 | `frame_iteration` | `examples/frame_iteration.zig` | Walking frames in a buffer with `FrameIterator` | `zig build run-frame_iteration` |
-| `long_distance_matching` | `examples/long_distance_matching.zig` | Long-distance matching, and when it does not help | `zig build run-long_distance_matching` |
+| `long_distance_matching` | `examples/long_distance_matching.zig` | Long-distance match finding with gear hashing and window bounding | `zig build run-long_distance_matching` |
 | `parallel_compression` | `examples/parallel_compression.zig` | Application-managed threads, one context per worker | `zig build run-parallel_compression` |
 | `dictionary_compression` | `examples/dictionary_compression.zig` | Train a dictionary, compress against it, decode with it | `zig build run-dictionary_compression` |
 | `dictionary_training` | `examples/dictionary_training.zig` | Training via `DictionaryBuilder.train`, `trainCover`, `trainFastCover` | `zig build run-dictionary_training` |
@@ -53,7 +53,7 @@ and what the output means.
 | [Compression Bound](/examples/compression_bound) | `compression_bound.zig` | `compressBound` as an upper bound, `compressInto` |
 | [Window Limit](/examples/window_limit) | `window_limit.zig` | `maxWindowSize` boundary, one-shot and streaming |
 | [Frame Iteration](/examples/frame_iteration) | `frame_iteration.zig` | `FrameIterator`, skippable frames, truncation |
-| [Long-Distance Matching](/examples/long_distance_matching) | `long_distance_matching.zig` | LDM options, and why it currently saves nothing |
+| [Long-Distance Matching](/examples/long_distance_matching) | `long_distance_matching.zig` | Long-distance matching options and window limits |
 | [Parallel Compression](/examples/parallel_compression) | `parallel_compression.zig` | One context per thread, and one frame across a worker pool |
 | [Dictionary Compression](/examples/dictionary_compression) | `dictionary_compression.zig` | Train, compress against, decode with |
 | [Dictionary Training](/examples/dictionary_training) | `dictionary_training.zig` | `train`, `trainCover`, `trainFastCover` |

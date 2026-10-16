@@ -1,13 +1,13 @@
 ---
 title: Basic Compression
-description: Basic one-shot compression and decompression round-trip.
+description: Basic one-shot compression and decompression round-trip in pure Zig.
 ---
 
 # Basic Compression
 
-`examples/basic_compression.zig` - the simplest `zstd.compress` / `zstd.decompress` usage.
+A complete example demonstrating simple one-shot compression and decompression using `zstd.compress` and `zstd.decompress`.
 
-## Client Code
+## Usage Example
 
 ```zig
 const std = @import("std");
@@ -18,17 +18,26 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // One allocator for the whole program; the library never creates its own.
+    // Prepare a sample payload with repetitive patterns
     var input: std.ArrayList(u8) = .empty;
     defer input.deinit(allocator);
     try input.appendSlice(allocator, "Hello, Zstandard! This is a basic compression example with some repetitive data. ");
     for (0..5) |_| try input.appendSlice(allocator, "Hello, Zstandard! ");
 
+    // Compress with default compression level (level 3)
     const compressed = try zstd.compress(allocator, input.items);
     defer allocator.free(compressed);
-    std.debug.print("Original: {d} bytes\nCompressed: {d} bytes\nRatio: {d:.2}%\n", .{ input.items.len, compressed.len, @as(f64, @floatFromInt(compressed.len)) / @as(f64, @floatFromInt(input.items.len)) * 100 });
+
+    std.debug.print("Original: {d} bytes\nCompressed: {d} bytes\nRatio: {d:.2}%\n", .{
+        input.items.len,
+        compressed.len,
+        @as(f64, @floatFromInt(compressed.len)) / @as(f64, @floatFromInt(input.items.len)) * 100.0,
+    });
+
+    // Decompress and verify lossless restoration
     const decompressed = try zstd.decompress(allocator, compressed);
     defer allocator.free(decompressed);
+
     std.debug.assert(std.mem.eql(u8, input.items, decompressed));
     std.debug.print("Round-trip verified: {d} bytes\n", .{decompressed.len});
 }
@@ -43,15 +52,13 @@ Ratio: 49.71%
 Round-trip verified: 171 bytes
 ```
 
-*Note: small payloads may expand slightly due to frame header (magic, FHD, window) - ratio >100% is expected for tiny inputs. Larger inputs compress well.*
-
 ## Explanation
 
-1. `zstd.compress(allocator, input)` - one-shot compression with default level 3, emits a full Zstandard frame (`0xFD2FB528` magic, `FHD`, optional `Frame_Content_Size`, `Window_Descriptor`, `Block_Header`, `Checksum`).
-2. `zstd.decompress(allocator, compressed)` - validates magic, parses `FHD`, decompresses `Raw_Block`/`RLE_Block` and verifies `Content_Checksum` if present.
-3. Round-trip `assert` proves lossless.
+1. **`zstd.compress(allocator, src)`**: Compresses the source data using default parameters (level 3, standard window) and returns an allocator-managed byte slice containing a standard Zstandard frame.
+2. **`zstd.decompress(allocator, src)`**: Parses the frame header, validates frame integrity and checksums, and decompresses all blocks into an allocator-owned slice.
+3. **Lossless Guarantee**: The decompressed slice matches the input byte-for-byte.
 
-Run:
+## Run Command
 
 ```bash
 zig build run-basic_compression

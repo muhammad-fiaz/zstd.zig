@@ -1,111 +1,195 @@
 ---
 title: Parallel Compression
-description: One context per thread for many inputs, or the library's own worker pool for one large input.
+description: Multithreaded Zstandard compression using isolated contexts or worker pools.
 ---
 
 # Parallel Compression
 
-`examples/parallel_compression.zig`
+Zstandard compression can be parallelized in two primary ways:
 
-There are two ways to compress in parallel, and the example does both.
+1. **One Context per Thread**: For handling many distinct files, network packets, or database records simultaneously, each worker thread maintains its own `CompressionContext` and `DecompressionContext`. Since contexts operate completely independently, no inter-thread locking is needed during compression.
+2. **`zstd.compressMT` / `MTCompressor`**: For compressing a single large file or buffer in parallel, the input is partitioned across a pool of background worker threads (`zstd.pool`), which produce a single standard Zstandard frame.
 
-1. **One context per thread.** The serial path (`Compressor`, `Decompressor`)
-   never starts a thread of its own, so parallelising it is your pattern. A
-   `Compressor` and a `Decompressor` hold frame state (entropy tables, buffers)
-   between calls, so sharing one across threads is a race; giving each thread
-   its own is not. The allocator may be shared, as long as it is thread-safe  - 
-   `std.heap.page_allocator` is used here for exactly that reason.
+## Usage Example
 
-2. **`compressMT` / `MTCompressor`.** One frame compressed by several workers
-   from the library's own pool (`zstd.pool`). This is the one you want for a
-   single large input. The frame is split into jobs, each job encodes a segment
-   seeded with the frame content just before it, and the finished result is one
-   ordinary frame with one header. Threads start only when you ask for them, and
-   they use the `std.Io` you pass in.
+```zig
+const std = @import("std");
+const builtin = @import("builtin");
+const zstd = @import("zstd");
+
+const thread_count = 4;
+const messages = 64;
+const payload_len = 32 * 1024;
+const mt_input_len = 4 * 1024 * 1024; // 4 MiB
+
+const Totals = struct { in: usize, out: usize };
+
+const Stripe = struct {
+    allocator: std.mem.Allocator,
+    totals: *Totals,
+    id: usize,
+    stride: usize,
+    buffer: []u8,
+};
+
+fn payloadFor(index: usize, buffer: []u8) []const u8 {
+    const header = "record:";
+    @memset(buffer, 0);
+    @memcpy(buffer[0..header.len], header);
+    var pos = header.len;
+    var value: u32 = @truncate(index *% 2654435761);
+    while (pos < buffer.len) {
+        value = value *% 1664525 +% 1013904223;
+        const run = 4 + @as(usize, @intCast((value >> 16) & 7));
+        const byte: u8 = if ((value >> 24) & 1 == 0) 'a' + @as(u8, @intCast((value >> 8) & 15)) else @truncate(value);
+        for (buffer[pos..@min(pos + run, buffer.len)]) |*b| b.* = byte;
+        pos += run;
+    }
+    return buffer;
+}
+
+fn runStripe(stripe: *Stripe) !void {
+    var compressor = zstd.Compressor.initWithLevel(stripe.allocator, 9);
+    defer compressor.deinit();
+    var decompressor = zstd.Decompressor.init(stripe.allocator);
+    defer decompressor.deinit();
+
+    var total_in: usize = 0;
+    var total_out: usize = 0;
+    var index = stripe.id;
+    while (index < messages) : (index += stripe.stride) {
+        const payload = payloadFor(index, stripe.buffer);
+        const frame = try compressor.compressAlloc(payload);
+        total_in += payload.len;
+        total_out += frame.len;
+
+        const restored = try decompressor.decompressAlloc(frame);
+        defer stripe.allocator.free(restored);
+        if (!std.mem.eql(u8, payload, restored)) return error.RoundTripFailed;
+        stripe.allocator.free(frame);
+    }
+    stripe.totals.* = .{ .in = total_in, .out = total_out };
+}
+
+fn threadEntry(stripe: *Stripe) void {
+    runStripe(stripe) catch |e| std.debug.panic("worker {d} failed: {s}", .{ stripe.id, @errorName(e) });
+}
+
+fn runSequential(allocator: std.mem.Allocator) !Totals {
+    var totals: Totals = .{ .in = 0, .out = 0 };
+    var stripe = Stripe{
+        .allocator = allocator,
+        .totals = &totals,
+        .id = 0,
+        .stride = 1,
+        .buffer = try allocator.alloc(u8, payload_len),
+    };
+    defer allocator.free(stripe.buffer);
+    try runStripe(&stripe);
+    return totals;
+}
+
+fn makeMtInput(allocator: std.mem.Allocator) ![]u8 {
+    const buffer = try allocator.alloc(u8, mt_input_len);
+    errdefer allocator.free(buffer);
+    var prng = std.Random.DefaultPrng.init(0x4D54);
+    const random = prng.random();
+    for (buffer[0 .. mt_input_len / 2]) |*b| b.* = random.intRangeAtMost(u8, 0, 63);
+    @memcpy(buffer[mt_input_len / 2 ..], buffer[0 .. mt_input_len / 2]);
+    return buffer;
+}
+
+fn runMultithreaded(allocator: std.mem.Allocator, io: std.Io, payload: []const u8) !void {
+    const options: zstd.CompressionOptions = .{ .level = 3, .checksum = true };
+
+    const serial_frame = try zstd.compressWithOptions(allocator, payload, options);
+    defer allocator.free(serial_frame);
+    const mt_frame = try zstd.compressMT(allocator, io, payload, options, thread_count);
+    defer allocator.free(mt_frame);
+
+    std.debug.print("\none {d} MiB input, level 3 with a checksum:\n", .{mt_input_len / (1024 * 1024)});
+    std.debug.print("  one frame, one thread:  {d} bytes\n", .{serial_frame.len});
+    std.debug.print("  one frame, {d} workers: {d} bytes\n", .{ thread_count, mt_frame.len });
+
+    for ([_][]const u8{ serial_frame, mt_frame }) |frame| {
+        const restored = try zstd.decompress(allocator, frame);
+        defer allocator.free(restored);
+        if (!std.mem.eql(u8, payload, restored)) return error.RoundTripFailed;
+    }
+    std.debug.print("  both decode back to the {d} byte input\n", .{payload.len});
+}
+
+pub fn main(init: std.process.Init) !void {
+    const allocator = std.heap.page_allocator;
+    std.debug.print("{d} messages of {d} KiB, {d} threads\n\n", .{ messages, payload_len / 1024, thread_count });
+
+    const serial = try runSequential(allocator);
+    std.debug.print("one thread:  {d} -> {d} bytes\n", .{ serial.in, serial.out });
+
+    var totals: [thread_count]Totals = undefined;
+    var stripes: [thread_count]Stripe = undefined;
+    var buffers: [thread_count][]u8 = undefined;
+    var threads: [thread_count - 1]std.Thread = undefined;
+
+    for (&totals, &stripes, &buffers, 0..) |*total, *stripe, *buffer, i| {
+        total.* = .{ .in = 0, .out = 0 };
+        buffer.* = try allocator.alloc(u8, payload_len);
+        stripe.* = .{ .allocator = allocator, .totals = total, .id = i, .stride = thread_count, .buffer = buffer.* };
+    }
+    defer for (buffers) |buffer| allocator.free(buffer);
+
+    try runStripe(&stripes[0]);
+    if (builtin.single_threaded) {
+        for (stripes[1..]) |*stripe| try runStripe(stripe);
+    } else {
+        for (&threads, 0..) |*t, i| t.* = try std.Thread.spawn(.{}, threadEntry, .{&stripes[i + 1]});
+        for (threads) |t| t.join();
+    }
+
+    var parallel: Totals = .{ .in = 0, .out = 0 };
+    for (totals) |total| {
+        parallel.in += total.in;
+        parallel.out += total.out;
+    }
+    std.debug.print("{d} threads:  {d} -> {d} bytes\n", .{ thread_count, parallel.in, parallel.out });
+
+    if (parallel.in != serial.in or parallel.out != serial.out) {
+        return error.TotalsDiffer;
+    }
+    std.debug.print("\nOK: {d} frames round tripped across {d} threads, identical totals\n", .{ messages, thread_count });
+
+    const mt_input = try makeMtInput(allocator);
+    defer allocator.free(mt_input);
+    try runMultithreaded(allocator, init.io, mt_input);
+    std.debug.print("\nOK: one frame compressed by {d} workers decodes like any other\n", .{thread_count});
+}
+```
 
 ## Output
 
 ```text
 64 messages of 32 KiB, 4 threads
 
-one thread:  2097152 -> 1389519 bytes
-4 threads:  2097152 -> 1389519 bytes
+one thread:  2097152 -> 863087 bytes
+4 threads:  2097152 -> 863087 bytes
 
 OK: 64 frames round tripped across 4 threads, identical totals
 
 one 4 MiB input, level 3 with a checksum:
-  one frame, one thread:  3149446 bytes
-  one frame, 4 workers:  3149677 bytes
+  one frame, one thread:  3147174 bytes
+  one frame, 4 workers: 3147400 bytes
   both decode back to the 4194304 byte input
 
 OK: one frame compressed by 4 workers decodes like any other
 ```
 
-## Source shape
+## Explanation
 
-One context per thread, many inputs:
+1. **Deterministic Multi-threading**: The independent context pattern achieves the exact same compressed byte total across 4 threads as a sequential single-threaded run.
+2. **Multithreaded Frame Compatibility**: Frames created by `zstd.compressMT` are fully standard Zstandard frames. Any standard Zstandard decoder decompresses them without multi-threading support required at decode time.
+3. **Explicit I/O**: The worker thread pool relies on the caller-provided `std.Io` handle, maintaining explicit system resource ownership.
 
-```zig
-const thread_count = 4;
-var totals: [thread_count]Totals = undefined;
-var stripes: [thread_count]Stripe = undefined;
-var threads: [thread_count - 1]std.Thread = undefined;
-
-for (&totals, &stripes, 0..) |*total, *stripe, i| {
-    total.* = .{ .in = 0, .out = 0 };
-    // Each worker gets its own contexts. Sharing one would be the race.
-    stripe.* = .{ .allocator = allocator, .totals = total, .id = i, .stride = thread_count };
-}
-
-// The calling thread takes stripe 0, so no worker idles.
-try runStripe(&stripes[0]);
-for (&threads, 0..) |*t, i| t.* = try std.Thread.spawn(.{}, threadEntry, .{&stripes[i + 1]});
-for (threads) |t| t.join();
-```
-
-One input, the library's workers:
-
-```zig
-// A single call: the pool starts the workers, splits the frame, and is joined
-// again before this returns.
-const frame = try zstd.compressMT(allocator, init.io, payload, .{ .level = 3 }, thread_count);
-defer allocator.free(frame);
-
-// Or keep the compressor for many frames: its pool is created once and reused.
-var mt = try zstd.MTCompressor.init(allocator, init.io, .{ .level = 3 }, thread_count);
-defer mt.deinit();
-const again = try mt.compressAlloc(payload);
-defer allocator.free(again);
-```
-
-## Notes
-
-- **The identical totals are the point.** One thread and four produce the same
-  1,389,519 bytes. Partitioning the work must not change the output, and the
-  equality check at the end enforces that rather than assuming it.
-- **The calling thread does one stripe itself**, so `thread_count` workers cost
-  `thread_count - 1` spawned threads.
-- **`stride` makes the stripes tile the range.** Worker `i` takes messages `i`,
-  `i + 4`, `i + 8`… so every message is compressed exactly once, and each worker's
-  totals accumulate into its own slot. Threads share the address space, so a
-  worker writes directly into its own `Totals`; the join is what makes the result
-  visible.
-- **Each worker decompresses what it compressed** and compares against the
-  original, so a context shared by mistake would show up as a mismatch or a
-  failure rather than passing silently.
-- **The multithreaded frame is a normal frame.** Nothing about it needs a
-  multithreaded decoder: one header, a checksum over the whole input, and blocks
-  in order. The example decodes both frames with the ordinary `decompress` and
-  compares against the input.
-- **The two frame sizes differ slightly** (3,149,446 against 3,149,677 bytes).
-  Jobs start with no repeat history of their own, so a job cannot reuse the
-  cheapest kind of match against a block another job encoded; that is a few
-  dozen bytes on a 4 MiB input and is the price of splitting the frame.
-- On a target with no threads (`builtin.single_threaded`), the remaining stripes
-  are folded into the caller's own work. The per-context rule still holds and the
-  totals are unchanged.
-
-Run:
+## Run Command
 
 ```bash
 zig build run-parallel_compression

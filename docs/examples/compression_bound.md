@@ -1,19 +1,63 @@
 ---
 title: Compression Bound
-description: Sizing an output buffer with compressBound and filling it exactly.
+description: Sizing output buffers with compressBound and safe preallocated compression.
 ---
 
 # Compression Bound
 
-`examples/compression_bound.zig`
+`zstd.compressBound(src_size)` computes the maximum possible compressed frame size for an uncompressed input of `src_size` bytes. It provides an upper bound that guarantees any compression level or configuration will fit into a buffer of that size without resizing or retrying.
 
-`zstd.compressBound(src_size)` returns the largest number of bytes
-`compressWithOptions` can produce for an input of that size, for any level and
-any options. Sizing a buffer with it means allocating once and never retrying.
+## Usage Example
 
-The guarantee is an upper bound, not an estimate. Incompressible input can grow:
-frame and block headers are fixed overhead, so a few bytes of input still produce
-a frame of some tens of bytes.
+```zig
+const std = @import("std");
+const zstd = @import("zstd");
+
+pub fn main() !void {
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    // Sizing buffers for different payload lengths
+    const sizes = [_]usize{ 0, 1, 1024, 64 * 1024, 1024 * 1024 };
+
+    for (sizes) |size| {
+        const payload = try allocator.alloc(u8, size);
+        defer allocator.free(payload);
+
+        // Fill with pseudorandom data (worst-case incompressible scenario)
+        var prng = std.Random.DefaultPrng.init(@intCast(size +% 1));
+        prng.random().bytes(payload);
+
+        const bound = zstd.compressBound(size);
+        const buf = try allocator.alloc(u8, bound);
+        defer allocator.free(buf);
+
+        const written = try zstd.compressInto(allocator, buf, payload, 19);
+        std.debug.print("size {d:>8}: bound {d:>8}, wrote {d:>8}\n", .{ size, bound, written });
+
+        // Verify round-trip decompression
+        const back = try zstd.decompressInto(allocator, payload, buf[0..written]);
+        if (back != size) {
+            return error.RoundTripFailed;
+        }
+    }
+
+    // Verify buffer safety: undersized buffers are strictly rejected
+    const bound = zstd.compressBound(4096);
+    const short_buf = try allocator.alloc(u8, bound - 1);
+    defer allocator.free(short_buf);
+    const small = try allocator.alloc(u8, 4096);
+    defer allocator.free(small);
+    @memset(small, 'a');
+
+    if (zstd.compressInto(allocator, short_buf, small, 3)) |_| {
+        return error.ShortBufferAccepted;
+    } else |e| {
+        std.debug.print("short buffer rejected as {s}, as documented\n", .{@errorName(e)});
+    }
+}
+```
 
 ## Output
 
@@ -26,31 +70,13 @@ size  1048576: bound  1052672, wrote  1048610
 short buffer rejected as DstSizeTooSmall, as documented
 ```
 
-## Reading the numbers
+## Explanation
 
-`bound` minus `wrote` is the headroom. For 1 MiB of input the bound is
-1,052,672 and the actual frame is 1,048,610 - about 0.4% more than the input, and
-4 KB under the bound. The `wrote` column crossing above `size` at 0 and 1 bytes is
-the fixed frame overhead, not a measurement error: an empty input is still a
-valid frame of 9 bytes.
+1. **Upper-Bound Guarantee**: Even for completely random data where compression expands slightly due to headers, `compressBound(size)` is guaranteed to be large enough to hold the output frame.
+2. **Fixed Frame Overhead**: For empty or 1-byte inputs, the output size is slightly larger than the input because a standard Zstandard frame requires at least a magic number (`0xFD2FB528`), a frame header descriptor, and a block header.
+3. **Safety Protection**: If a destination buffer is even 1 byte smaller than required, `zstd.compressInto` cleanly fails with `error.DstSizeTooSmall` without corrupting memory or writing out of bounds.
 
-The last line is the guarantee being enforced rather than assumed. A buffer one
-byte shorter than the bound is rejected with `DstSizeTooSmall` instead of
-overrunning.
-
-## API used
-
-| Call | Role |
-|---|---|
-| `zstd.compressBound(src_size)` | Largest output for that input size; errors with `SrcSizeTooLarge` at or above the format's maximum |
-| `zstd.compressInto(allocator, dst, src, level)` | Compress into a buffer you sized, returning bytes written |
-| `zstd.decompressInto(allocator, dst, src)` | Decompress into a caller buffer, returning bytes written |
-
-`compressBound` can fail: an input size at or above `MAX_INPUT_SIZE` is not
-representable in the format, and reporting that is better than returning a
-wrapped value that would then look like a real bound.
-
-Run:
+## Run Command
 
 ```bash
 zig build run-compression_bound

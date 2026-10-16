@@ -5,9 +5,9 @@ description: Explicit std.Io chunk streaming file compression, decompression, an
 
 # Explicit std.Io Streaming File Compression & Decompression
 
-`examples/explicit_io_streaming.zig`: explicit `std.Io.Dir` chunked streaming compression, decompression, and reusable client-side `Encoder` and `Decoder` contexts in native Zig 0.17.
+This example demonstrates chunked streaming file compression and decompression using explicit `std.Io.Dir` operations, alongside reusable client-side `Encoder` and `Decoder` contexts in native Zig 0.17.
 
-## Client Code
+## Usage Example
 
 ```zig
 const std = @import("std");
@@ -220,12 +220,12 @@ Stream 2: 100 -> 90 bytes (verified bit-for-bit, 0 context re-init)
 
 ## Explanation
 
-- **Chunked File Streaming**: Streams arbitrary-size files in small fixed-size chunks (e.g. 4 KiB buffers) using Zig 0.17 explicit `std.Io` (`createFile`, `openFile`, `readPositionalAll`, `writePositionalAll`).
-- **`StreamingCompressor`**: Incremental chunk compression with `.cont` while processing data and `.end` to flush remaining compressed frame blocks.
-- **`StreamingDecompressor`**: Incremental frame decompression tracking `inConsumed` and `outProduced`, supporting partial buffers and progressive output.
-- **Reusable Contexts (`Encoder` & `Decoder`)**: Explicit client-side contexts allow repeated compressions and decompressions across independent streams without reallocating internal workspace buffers.
+1. **Chunked File Streaming**: Streams arbitrary-size files in small fixed-size chunks (e.g. 4 KiB buffers) using Zig 0.17 explicit `std.Io` (`createFile`, `openFile`, `readPositionalAll`, `writePositionalAll`).
+2. **`StreamingCompressor`**: Incremental chunk compression with `.cont` while processing data and `.end` to flush remaining compressed frame blocks.
+3. **`StreamingDecompressor`**: Incremental frame decompression tracking `inConsumed` and `outProduced`, supporting partial buffers and progressive output.
+4. **Reusable Contexts (`Encoder` & `Decoder`)**: Explicit client-side contexts allow repeated compressions and decompressions across independent streams without reallocating internal workspace buffers.
 
-Run:
+## Run Command
 
 ```bash
 zig build run-explicit_io_streaming

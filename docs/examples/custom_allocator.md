@@ -1,13 +1,13 @@
 ---
 title: Custom Allocator
-description: TrackingAllocator usage and leak checking.
+description: Custom memory tracking allocator and allocation accounting with zstd.zig.
 ---
 
 # Custom Allocator
 
-`examples/custom_allocator.zig` - `TrackingAllocator` with `zstd`.
+All memory allocations in `zstd.zig` are explicitly managed through caller-provided `std.mem.Allocator` instances. The library never calls global allocation routines or hidden heap allocators. This example demonstrates using a custom `TrackingAllocator` to track live bytes and verify complete cleanup.
 
-## Client Code
+## Usage Example
 
 ```zig
 const std = @import("std");
@@ -70,8 +70,6 @@ pub fn main() !void {
     var tracking = TrackingAllocator{ .parent = gpa.allocator() };
     const allocator = tracking.allocator();
 
-    // One client allocator flows into one reusable context, which performs
-    // many operations without ever creating its own allocator.
     var ctx = zstd.Context.init(allocator);
     defer ctx.deinit();
 
@@ -82,13 +80,19 @@ pub fn main() !void {
 
         const c = try ctx.compress(data.items);
         defer allocator.free(c);
-        std.debug.print("Compressed {d} -> {d} bytes with tracking allocator: {d} allocs, {d} bytes net (live)\n", .{ data.items.len, c.len, tracking.allocs, tracking.allocated });
+        std.debug.print("Compressed {d} -> {d} bytes with tracking allocator: {d} allocs, {d} bytes net (live)\n", .{
+            data.items.len,
+            c.len,
+            tracking.allocs,
+            tracking.allocated,
+        });
+
         const d = try ctx.decompress(c);
         defer allocator.free(d);
         std.debug.assert(std.mem.eql(u8, data.items, d));
         std.debug.print("Decompressed {d} bytes, verified\n", .{d.len});
 
-        // A second round through the SAME context and allocator proves reuse.
+        // Reuse the same context and allocator across calls
         const c2 = try ctx.compress("second payload through the same context");
         defer allocator.free(c2);
         const d2 = try ctx.decompress(c2);
@@ -96,7 +100,11 @@ pub fn main() !void {
         std.debug.assert(std.mem.eql(u8, "second payload through the same context", d2));
     }
 
-    std.debug.print("After free: {d} allocs, {d} frees, {d} bytes net (balanced)\n", .{ tracking.allocs, tracking.frees, tracking.allocated });
+    std.debug.print("After free: {d} allocs, {d} frees, {d} bytes net (balanced)\n", .{
+        tracking.allocs,
+        tracking.frees,
+        tracking.allocated,
+    });
     std.debug.assert(tracking.allocated == 0);
     std.debug.assert(tracking.allocs == tracking.frees);
 }
@@ -105,17 +113,18 @@ pub fn main() !void {
 ## Output
 
 ```text
-Compressed 330 -> 77 bytes with tracking allocator: 10 allocs, 601 bytes net (live)
+Compressed 330 -> 79 bytes with tracking allocator: 10 allocs, 603 bytes net (live)
 Decompressed 330 bytes, verified
 After free: 24 allocs, 24 frees, 0 bytes net (balanced)
 ```
 
 ## Explanation
 
-- All public APIs (`compress`, `decompress`, `Streaming*`, `Dictionary`) are `allocator`-aware and propagate `error.OutOfMemory`.
-- `TrackingAllocator` demonstrates `rawAlloc`/`rawFree`/`rawResize`/`rawRemap` accounting; `zstd` never leaks - `allocated` returns to 0 after `free`.
+1. **Explicit Memory Lifetime**: The caller controls how memory is allocated (via GPA, arena, fixed buffer, or custom tracking allocator).
+2. **Zero Leaks**: All temporary buffers allocated during Huffman tree building, FSE table conversion, or block matching are freed cleanly, resulting in a balanced allocation count.
+3. **Context Reuse**: Reusable contexts recycle buffers to avoid reallocating scratch structures between calls.
 
-Run:
+## Run Command
 
 ```bash
 zig build run-custom_allocator

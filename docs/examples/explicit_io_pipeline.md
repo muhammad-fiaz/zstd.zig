@@ -5,9 +5,9 @@ description: Explicit std.Io Reader and Writer pipeline streaming compression, d
 
 # Explicit std.Io Reader & Writer Pipeline Streaming
 
-`examples/explicit_io_pipeline.zig`: demonstrates connecting native Zig Zstandard to Zig 0.17.0's explicit I/O subsystem (`std.Io`) via memory readers (`std.Io.Reader.fixed`), dynamic allocating writers (`std.Io.Writer.Allocating`), bounded fixed-buffer writers (`std.Io.Writer.fixed`), and multithreaded explicit I/O (`std.Io.Threaded`).
+This example demonstrates connecting native Zig Zstandard to Zig 0.17.0's explicit I/O subsystem (`std.Io`) via memory readers (`std.Io.Reader.fixed`), dynamic allocating writers (`std.Io.Writer.Allocating`), bounded fixed-buffer writers (`std.Io.Writer.fixed`), and multithreaded explicit I/O (`std.Io.Threaded`).
 
-## Client Code
+## Usage Example
 
 ```zig
 const std = @import("std");
@@ -136,9 +136,9 @@ pub fn main(init: std.process.Init) !void {
 }
 ```
 
-## Expected Output
+## Output
 
-```
+```text
 ==================================================
 Explicit std.Io Reader/Writer Pipeline Streaming
 ==================================================
@@ -155,12 +155,12 @@ Explicit std.Io pipeline completed successfully.
 
 ## Explanation
 
-- **`std.Io.Reader.fixed`**: Creates an explicit, zero-allocation reader over any immutable in-memory byte slice.
-- **`std.Io.Writer.Allocating`**: Manages an auto-growing buffer that collects stream-compressed bytes via `comp_writer.writeAll`.
-- **`std.Io.Writer.fixed`**: Writes directly into a bounded caller-provided buffer slice with exact position tracking (`writer.end`).
-- **`std.Io.Threaded`**: Exposes the explicit `io` handle needed by the thread pool for multi-threaded chunk compression.
+1. **`std.Io.Reader.fixed`**: Creates an explicit, zero-allocation reader over any immutable in-memory byte slice.
+2. **`std.Io.Writer.Allocating`**: Manages an auto-growing buffer that collects stream-compressed bytes via `comp_writer.writeAll`.
+3. **`std.Io.Writer.fixed`**: Writes directly into a bounded caller-provided buffer slice with exact position tracking (`writer.end`).
+4. **`std.Io.Threaded`**: Exposes the explicit `io` handle needed by the thread pool for multi-threaded chunk compression.
 
-Run:
+## Run Command
 
 ```bash
 zig build run-explicit_io_pipeline
