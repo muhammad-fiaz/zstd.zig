@@ -5,21 +5,85 @@ description: Bounding how large a declared window the decoder will accept.
 
 # Window Limit
 
-`examples/window_limit.zig`
+Every Zstandard frame header declares the window size required to decompress it. To prevent denial-of-service attacks from untrusted data declaring arbitrary window sizes (e.g. multi-gigabyte windows), the decoder provides configurable ceiling limits via `maxWindowSize`.
 
-A frame header states the window it wants. Honouring that blindly would let a
-hostile header demand an enormous buffer, so the decoder refuses frames above a
-caller-supplied limit. The limit is a **ceiling**, not a target: a frame at or
-below it decodes, one byte above it does not.
-
-## Source
+## Usage Example
 
 ```zig
-const small = try zstd.compressWithOptions(allocator, &payload, .{ .windowLog = 10 });
-const large = try zstd.compressWithOptions(allocator, &payload, .{ .windowLog = 18 });
+const std = @import("std");
+const zstd = @import("zstd");
 
-const small_window: usize = @intCast((try zstd.inspectFrame(allocator, small)).header.windowSize);
-const large_window: usize = @intCast((try zstd.inspectFrame(allocator, large)).header.windowSize);
+pub fn main() !void {
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    // Two frames with distinct window sizes
+    const small = try zstd.compressWithOptions(allocator, "a small frame", .{ .windowLog = 10 });
+    defer allocator.free(small);
+
+    var payload: [200_000]u8 = undefined;
+    var prng = std.Random.DefaultPrng.init(4242);
+    for (&payload) |*b| b.* = if (prng.random().boolean()) 'a' else 'b';
+    const large = try zstd.compressWithOptions(allocator, &payload, .{ .windowLog = 18 });
+    defer allocator.free(large);
+
+    const small_window: usize = @intCast((try zstd.inspectFrame(allocator, small)).header.windowSize);
+    const large_window: usize = @intCast((try zstd.inspectFrame(allocator, large)).header.windowSize);
+    std.debug.print("small frame declares a {d} byte window\n", .{small_window});
+    std.debug.print("large frame declares a {d} byte window\n", .{large_window});
+
+    // The limit is a ceiling: equal or higher limits succeed
+    try tryLimit(allocator, small, small_window, true);
+    try tryLimit(allocator, small, small_window + 1, true);
+    // Lower limits are safely refused
+    try tryLimit(allocator, small, small_window - 1, false);
+    try tryLimit(allocator, small, 0, false);
+
+    // Concatenated streams enforce the limit per-frame
+    var joined: std.ArrayList(u8) = .empty;
+    defer joined.deinit(allocator);
+    try joined.appendSlice(allocator, small);
+    try joined.appendSlice(allocator, large);
+    try tryLimit(allocator, joined.items, small_window + 1, false);
+    try tryLimit(allocator, joined.items, large_window, true);
+
+    // Streaming decoder enforces the same limit
+    var sd = zstd.StreamingDecompressor.init(allocator);
+    defer sd.deinit();
+    sd.setMaxWindowSize(large_window);
+    var out_buf2: [8192]u8 = undefined;
+    const r = try sd.decompressStream(&out_buf2, large);
+    std.debug.print("streaming with a matching limit accepted {d} bytes\n", .{r.outProduced});
+
+    var tight = zstd.StreamingDecompressor.init(allocator);
+    defer tight.deinit();
+    tight.setMaxWindowSize(small_window);
+    if (tight.decompressStream(&out_buf2, large)) |_| {
+        return error.LimitNotEnforced;
+    } else |e| {
+        std.debug.print("streaming refused it as {s}\n", .{@errorName(e)});
+    }
+}
+
+fn tryLimit(
+    allocator: std.mem.Allocator,
+    src: []const u8,
+    limit: usize,
+    expect_ok: bool,
+) !void {
+    const outcome = zstd.decompressWithOptions(allocator, src, .{ .maxWindowSize = limit });
+    if (outcome) |out| {
+        defer allocator.free(out);
+        if (!expect_ok) {
+            return error.LimitNotEnforced;
+        }
+        std.debug.print("limit {d}: accepted, {d} bytes\n", .{ limit, out.len });
+    } else |e| {
+        if (expect_ok) return e;
+        std.debug.print("limit {d}: refused as {s}\n", .{ limit, @errorName(e) });
+    }
+}
 ```
 
 ## Output
@@ -37,37 +101,13 @@ streaming with a matching limit accepted 8192 bytes
 streaming refused it as WindowTooLarge
 ```
 
-## The boundary
+## Explanation
 
-The first three lines are the whole contract, and the third is the one that
-matters:
+1. **Ceiling Semantics**: `maxWindowSize` sets the maximum allowable history window. A frame declaring a window less than or equal to this ceiling succeeds; a frame demanding more is immediately rejected with `error.WindowTooLarge`.
+2. **One-Shot and Streaming Support**: Limits can be configured in `DecompressionOptions.maxWindowSize` for one-shot calls, on `DecompressionContext.setMaxWindowSize()`, and on `StreamingDecompressor.setMaxWindowSize()`.
+3. **Protection**: Rejection happens before internal window memory is allocated, safeguarding servers against out-of-memory crashes when parsing untrusted data.
 
-- **limit 13** - the frame's own window. Accepted.
-- **limit 14** - one above. Accepted, because the limit is a ceiling and a frame
-  smaller than the limit is fine.
-- **limit 12** - one below. **Refused.** A frame needing exactly `window` bytes of
-  history has no slack, so the boundary is exact and the off-by-one is in the
-  refusing direction.
-
-`limit 0` is refused for the same reason, and `limit 14` against the large frame
-is refused because 200000 > 14. The last two lines repeat the check through
-`StreamingDecompressor`, which must reach the same verdict as the one-shot path  - 
-otherwise a caller would get different answers depending on how it happened to
-read the data.
-
-## Where the limit goes
-
-| Path | How to set it |
-|---|---|
-| One-shot | `zstd.decompressWithOptions(..., .{ .maxWindowSize = limit })` |
-| Context | `ctx.setMaxWindowSize(limit)` |
-| Streaming | `StreamingDecompressor` + `setMaxWindowSize(limit)` |
-
-The default is `1 << 27` (128 MiB), which is the format's own maximum window log.
-Lowering it is how you bound memory for untrusted input; a frame that declares
-more than you allow is refused before any buffer of that size is allocated.
-
-Run:
+## Run Command
 
 ```bash
 zig build run-window_limit

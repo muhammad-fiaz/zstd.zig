@@ -697,17 +697,6 @@ pub fn decompressFrontEndChecks(dst_size: usize, c_src_size: usize) errors.ZstdE
 }
 // Tests
 const testing = std.testing;
-// ---------------------------------------------------------------------------
-// Stream decoding
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Stream layouts
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 /// A weight list read from a real captured literal body, so the X4 builder is
 /// exercised on the weight spread a genuine encoder produces rather than a

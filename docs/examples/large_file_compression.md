@@ -5,9 +5,9 @@ description: Compressing multi-megabyte datasets and inspecting compressed archi
 
 # Large File Compression
 
-`examples/large_file_compression.zig` demonstrates compressing a 4 MiB structured dataset, evaluating compression ratios, and preserving the `.zst` archive on disk for direct inspection.
+This example demonstrates compressing a 4 MiB structured dataset, evaluating throughput and compression ratios, and preserving the resulting `.zst` archive file on disk for direct inspection.
 
-## Client Code
+## Usage Example
 
 ```zig
 const std = @import("std");
@@ -104,15 +104,7 @@ pub fn main(init: std.process.Init) !void {
 }
 ```
 
-## Running the Example
-
-Run with `zig build`:
-
-```bash
-zig build run-large_file_compression
-```
-
-Sample output:
+## Output
 
 ```text
 ==================================================
@@ -124,12 +116,24 @@ Zstandard Large File Compression Benchmark
 4. Saved compressed archive to 'large_compressed.zst' (preserved on disk for inspection)
 --------------------------------------------------
 Original size:    4194304 bytes (4.00 MiB)
-Compressed size:  12961 bytes (12.66 KiB)
+Compressed size:  12957 bytes (12.65 KiB)
 Compression ratio:0.31%
 Space savings:    99.69%
-Compression time: 1558.73 ms (2.6 MB/s throughput)
+Compression time: 1664.10 ms (2.4 MB/s throughput)
 --------------------------------------------------
 5. Decompressing and verifying bit-for-bit round trip...
 6. Verified: Decompressed data matches original exactly bit-for-bit!
 ==================================================
+```
+
+## Explanation
+
+1. **High Compression Ratio**: For structured log files, Zstandard achieves superior compression (0.31% of original size, or >99.6% space reduction).
+2. **Multi-Megabyte Performance**: Processes multi-megabyte payloads in continuous memory with predictable throughput and minimal allocation overhead.
+3. **Artifact Persistence**: Preserves the `.zst` file directly on disk for verification.
+
+## Run Command
+
+```bash
+zig build run-large_file_compression
 ```

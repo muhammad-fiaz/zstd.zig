@@ -5,24 +5,95 @@ description: Preparing dictionary state once and reusing it across many operatio
 
 # Prepared Dictionary
 
-`examples/prepared_dictionary.zig`
+A prepared dictionary parses and pre-computes the entropy tables (Huffman literals and FSE sequence models) for a dictionary once. Successive compression contexts can attach the prepared dictionary to compress similar records with minimal setup overhead.
 
-A *prepared* dictionary carries, after its magic and ID, the entropy tables that
-describe its own content: a Huffman table for literals, FSE normalized counts for
-the three sequence code sets, and the three repeat offsets in use when it was
-built. A frame compressed against it inherits those tables instead of re-deriving
-them from scratch, which is the point of preparing rather than loading raw
-content.
+## Usage Example
 
-Preparation produces no mutable state, so one prepared dictionary can be read by
-many contexts at once.
+```zig
+const std = @import("std");
+const zstd = @import("zstd");
+
+pub fn main() !void {
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    // Shared content that recurring payloads share
+    const shared = "the recurring phrase that every payload in this example shares";
+
+    // Prepare dictionary once: builds pre-computed entropy tables
+    var prepared = try zstd.prepareDictionary(allocator, shared);
+    defer prepared.deinit();
+    std.debug.print("prepared dictionary id {d}, {d} bytes of content\n", .{
+        prepared.id,
+        prepared.content().len,
+    });
+
+    var dict = try zstd.loadDictionary(allocator, prepared.data);
+    defer dict.deinit();
+
+    const inputs = [_][]const u8{
+        shared,
+        "a payload with no overlap at all, to show the dictionary is optional per frame",
+        "the recurring phrase that every payload shares, plus a tail",
+        "",
+    };
+
+    // Reuse a single compressor context across every input
+    var comp = zstd.Compressor.init(allocator);
+    defer comp.deinit();
+    comp.setDictionary(&dict);
+
+    var frames: [inputs.len][]u8 = undefined;
+    for (inputs, 0..) |text, i| {
+        frames[i] = try comp.compressAlloc(text);
+        std.debug.print("compressed {d:>3} bytes into {d:>3}\n", .{ text.len, frames[i].len });
+    }
+    defer for (frames) |f| allocator.free(f);
+
+    // Reuse a single decompressor context
+    var dec = zstd.Decompressor.init(allocator);
+    defer dec.deinit();
+    dec.setDictionary(&dict);
+
+    for (inputs, 0..) |text, i| {
+        const back = try dec.decompressAlloc(frames[i]);
+        defer allocator.free(back);
+        if (!std.mem.eql(u8, back, text)) {
+            return error.RoundTripFailed;
+        }
+        std.debug.print("frame {d} round tripped, {d} bytes\n", .{ i, back.len });
+    }
+
+    // Safety: mismatched dictionary is strictly refused
+    var other = try zstd.createDictionaryFromData(allocator, "a completely different body", 999);
+    defer other.deinit();
+    if (zstd.decompressWithOptions(allocator, frames[0], .{
+        .dictionary = &other,
+        .requireDictionaryMatch = true,
+    })) |wrong| {
+        allocator.free(wrong);
+        return error.WrongDictionaryAccepted;
+    } else |e| {
+        std.debug.print("mismatched dictionary refused as {s}\n", .{@errorName(e)});
+    }
+
+    // Missing required dictionary is also refused
+    if (zstd.decompressWithOptions(allocator, frames[0], .{ .requireDictionaryMatch = true })) |wrong| {
+        allocator.free(wrong);
+        return error.MissingDictionaryAccepted;
+    } else |e| {
+        std.debug.print("missing dictionary refused as {s}\n", .{@errorName(e)});
+    }
+}
+```
 
 ## Output
 
 ```text
 prepared dictionary id 0, 62 bytes of content
 compressed  62 bytes into  16
-compressed  78 bytes into  81
+compressed  78 bytes into  71
 compressed  59 bytes into  31
 compressed   0 bytes into   9
 frame 0 round tripped, 62 bytes
@@ -33,34 +104,13 @@ mismatched dictionary refused as InvalidOffset
 missing dictionary refused as DictionaryWrong
 ```
 
-## API used
+## Explanation
 
-| Call | Role |
-|---|---|
-| `zstd.prepareDictionary(allocator, bytes)` | Parse an existing dictionary into reusable state |
-| `zstd.PreparedDictionary.fromContent(allocator, text, id)` | Wrap raw content with a magic and ID |
-| `prepared.content()` | The dictionary content, without any header or tables |
-| `zstd.loadDictionary(allocator, bytes)` | A `Dictionary` view for a context to hold |
-| `zstd.createDictionaryFromData(allocator, text, id)` | Same, from raw content |
-| `zstd.Compressor.setDictionary` / `zstd.Decompressor.setDictionary` | Attach it |
+1. **`prepareDictionary`**: Compiles dictionary entropy structures ahead of time. This amortizes the cost of entropy analysis over thousands of messages.
+2. **Context Reuse**: A single `Compressor` (`CompressionContext`) or `Decompressor` (`DecompressionContext`) retains the dictionary pointer and reuses it across multiple frames without resetting or reallocating memory.
+3. **Safety Verification**: When `.requireDictionaryMatch = true` is supplied to `decompressWithOptions`, decoding a frame with the wrong dictionary or omitting the dictionary returns an error (`error.InvalidOffset` or `error.DictionaryWrong`).
 
-## Notes
-
-- **Line 3 is the honest result.** 78 bytes of unrelated text does not fit the
-  62-byte dictionary, so the frame is *larger* than the input - 81 bytes for 78.
-  A dictionary helps when the payload shares phrasing with it and costs when it
-  does not. Line 4 is the middle case, and line 5 is an empty payload, which still
-  needs a 9-byte frame.
-- **The last two lines are the safety property.** A frame compressed against one
-  dictionary must not decode against another: its matches point at specific
-  content, and decoding against the wrong dictionary produces plausible-looking
-  rubbish rather than an obvious failure. A missing dictionary is refused too,
-  for the same reason.
-- One prepared dictionary is built and then used for all four compressions and
-  all four decompressions. Nothing about the second use depends on the first,
-  which is the property that makes preparation worth doing.
-
-Run:
+## Run Command
 
 ```bash
 zig build run-prepared_dictionary

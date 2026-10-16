@@ -193,4 +193,13 @@ defer allocator.free(mt_compressed);
 
 `zstd.Compressor` is a direct alias for `zstd.CompressionContext` matching client naming conventions.
 
+## Memory Management & Safety
+
+1. **Explicit Allocator Initialization**: `CompressionContext`, `Compressor`, and `Encoder` require `allocator: std.mem.Allocator` at initialization. All dynamic tables and buffers are allocated via this allocator.
+2. **Context Cleanup**: Call `defer cctx.deinit()` (or `defer encoder.deinit()`) immediately after initialization to ensure all scratch workspaces, entropy tables, and match finder buffers are freed.
+3. **Allocation Lifecycle**:
+   - `compressAlloc(...)` and `encoder.compress(...)` allocate and return a `[]u8` owned by the caller. Free it with `defer allocator.free(result)`.
+   - `compress(dst, src)` and `compressInto(dst, src)` perform zero allocations at compression time, writing directly into the caller-owned `dst` buffer.
+4. **Bounds Enforcement**: Buffers are rigorously checked before any write. A destination buffer smaller than the compressed output safely returns `error.DstSizeTooSmall` without buffer overflows.
+
 

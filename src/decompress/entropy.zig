@@ -435,6 +435,25 @@ fn copyMatch(
     if (offset > max_offset) return error.Corruption;
     if (len == 0) return error.Corruption;
     if (outPos + len > dst.len) return error.DstSizeTooSmall;
+
+    if (offset <= outPos) {
+        // Fast path: match is within the current block output.
+        if (offset == 1) {
+            @memset(dst[outPos .. outPos + len], dst[outPos - 1]);
+            return;
+        } else if (offset >= len) {
+            @memcpy(dst[outPos .. outPos + len], dst[outPos - offset .. outPos - offset + len]);
+            return;
+        } else {
+            const src_start = outPos - offset;
+            for (0..len) |m| {
+                dst[outPos + m] = dst[src_start + m];
+            }
+            return;
+        }
+    }
+
+    // Match reaches into history or dict.
     var m: usize = 0;
     while (m < len) : (m += 1) {
         const src_virt = dict.len + history.len + outPos + m - offset;
@@ -472,7 +491,7 @@ pub fn decodeSequences(
 ) errors.ZstdError!usize {
     var pos: usize = 0;
 
-    // --- nbSeq ---
+    // Sequence count (nbSeq)
     if (src.len < 1) return error.SrcSizeWrong;
     var nbSeq: usize = src[pos];
     pos += 1;
@@ -492,11 +511,11 @@ pub fn decodeSequences(
     if (nbSeq == 0) {
         if (pos != src.len) return error.Corruption; // extraneous data
         if (literals.len > dst.len) return error.DstSizeTooSmall;
-        std.mem.copyForwards(u8, dst[0..literals.len], literals);
+        @memcpy(dst[0..literals.len], literals);
         return literals.len;
     }
 
-    // --- symbol compression modes ---
+    // Symbol compression modes
     if (pos >= src.len) return error.SrcSizeWrong;
     const mode_byte = src[pos];
     pos += 1;
@@ -515,7 +534,7 @@ pub fn decodeSequences(
     const of_table = &(state.of orelse return error.Corruption);
     const ml_table = &(state.ml orelse return error.Corruption);
 
-    // --- FSE bitstream ---
+    // FSE bitstream decoding
     var ds = BIT_DStream.init(src[pos..]) catch return error.Corruption;
     // An RLE table has a table log of zero and one entry that maps to itself, so
     // its state starts at zero and never moves; every other mode seeds the state
@@ -595,7 +614,7 @@ pub fn decodeSequences(
         // Execute: copy literals.
         if (litPos + litLen > literals.len) return error.Corruption;
         if (outPos + litLen > dst.len) return error.DstSizeTooSmall;
-        std.mem.copyForwards(u8, dst[outPos .. outPos + litLen], literals[litPos .. litPos + litLen]);
+        @memcpy(dst[outPos .. outPos + litLen], literals[litPos .. litPos + litLen]);
         litPos += litLen;
         outPos += litLen;
 
@@ -624,7 +643,7 @@ pub fn decodeSequences(
     const tail = literals.len - litPos;
     if (tail > 0) {
         if (outPos + tail > dst.len) return error.DstSizeTooSmall;
-        std.mem.copyForwards(u8, dst[outPos .. outPos + tail], literals[litPos..]);
+        @memcpy(dst[outPos .. outPos + tail], literals[litPos..]);
         outPos += tail;
     }
 

@@ -114,7 +114,7 @@ pub fn readSeqHeader(
 
     const dumps_length: usize = if ((mode_byte & 2) != 0) blk: {
         if (src.len < pos + 2) return error.SrcSizeWrong;
-        const v = @as(usize, src[pos]) | (@as(usize, src[pos + 1]) << 8);
+        const v = std.mem.readInt(u16, src[pos..][0..2], .little);
         pos += 2;
         break :blk v;
     } else blk: {
@@ -233,10 +233,7 @@ const Dumps = struct {
 
     fn le24(self: *Dumps) usize {
         if (self.pos + 3 <= self.data.len) {
-            const d = self.data;
-            const v = @as(usize, d[self.pos]) |
-                (@as(usize, d[self.pos + 1]) << 8) |
-                (@as(usize, d[self.pos + 2]) << 16);
+            const v = std.mem.readInt(u24, self.data[self.pos..][0..3], .little);
             self.pos += 3;
             return v;
         }
@@ -530,9 +527,9 @@ fn decodeSequencePeakOrder(
 
 /// Writes one sequence into the output, advancing `written` and `lit_read`.
 ///
-/// Every bound the reference checks with pointer arithmetic is checked here with
-/// indices: the literal run must fit what is left of the literal section, the
-/// match must fit the output, and the distance must not reach before the frame.
+/// Every boundary condition is rigorously validated with indices: the literal run
+/// must fit what is left of the literal section, the match must fit the output,
+/// and the distance must not reach before the frame.
 fn execSequence(
     version: format.Version,
     out: Output,

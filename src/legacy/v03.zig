@@ -94,12 +94,7 @@ test "v03: the encoder's frame decodes back to its input" {
         try testing.expect(n <= frame.len);
 
         // The magic is the version's own, not v0.2's.
-        try testing.expectEqualSlices(u8, &[_]u8{
-            @truncate(magic),
-            @truncate(magic >> 8),
-            @truncate(magic >> 16),
-            @truncate(magic >> 24),
-        }, frame[0..4]);
+        try testing.expectEqual(magic, std.mem.readInt(u32, frame[0..4], .little));
 
         const out = try testing.allocator.alloc(u8, src.len + 16);
         defer testing.allocator.free(out);

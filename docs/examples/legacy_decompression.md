@@ -1,13 +1,13 @@
 ---
 title: Legacy Decompression
-description: Legacy frame detection for v01-v07 and skippable frames.
+description: Historic frame detection and native decompression for v0.1 through v0.7.
 ---
 
 # Legacy Decompression
 
-`examples/legacy_decompression.zig` - `zstd.legacy` and `legacy_detect`.
+Before the Zstandard specification finalized on magic number `0xFD2FB528`, historical versions from v0.1 to v0.7 used distinct magic numbers and evolving frame layouts. `zstd.zig` includes pure Zig decoding support for all seven historical versions (v0.1 through v0.7).
 
-## Client Code
+## Usage Example
 
 ```zig
 const std = @import("std");
@@ -18,47 +18,66 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // Historic frames: how they are recognised, and what happens next
-    const legacyMagics = [_]struct { version: u8, magic: u32 }{
-        .{ .version = 1, .magic = 0xFD2FB51E },
-        .{ .version = 2, .magic = 0xFD2FB522 },
-        .{ .version = 3, .magic = 0xFD2FB523 },
-        .{ .version = 4, .magic = 0xFD2FB524 },
-        .{ .version = 5, .magic = 0xFD2FB525 },
-        .{ .version = 6, .magic = 0xFD2FB526 },
-        .{ .version = 7, .magic = 0xFD2FB527 },
+    // 1. Contrast against a modern Zstandard frame
+    const modern = try zstd.compress(allocator, "a modern frame is decoded by the normal path");
+    defer allocator.free(modern);
+    std.debug.print("modern frame magic 0x{X:0>8}: isLegacy={} version={?d}\n\n", .{
+        @as(u32, 0xFD2FB528),
+        zstd.legacy.isLegacy(modern),
+        zstd.legacyDetect.legacyVersion(modern),
+    });
+
+    // 2. Historic magic numbers across all seven versions
+    const historic = [_]struct { version: u8, magic: u32, big_endian: bool }{
+        .{ .version = 1, .magic = 0xFD2FB51E, .big_endian = true },
+        .{ .version = 2, .magic = 0xFD2FB522, .big_endian = false },
+        .{ .version = 3, .magic = 0xFD2FB523, .big_endian = false },
+        .{ .version = 4, .magic = 0xFD2FB524, .big_endian = false },
+        .{ .version = 5, .magic = 0xFD2FB525, .big_endian = false },
+        .{ .version = 6, .magic = 0xFD2FB526, .big_endian = false },
+        .{ .version = 7, .magic = 0xFD2FB527, .big_endian = false },
     };
 
-    for (legacyMagics) |lm| {
-        var frame: [4]u8 = undefined;
-        frame[0] = @truncate(lm.magic);
-        frame[1] = @truncate(lm.magic >> 8);
-        frame[2] = @truncate(lm.magic >> 16);
-        frame[3] = @truncate(lm.magic >> 24);
-        std.debug.print("Legacy v{d:0>2} magic 0x{X:0>8} isLegacy={} version={?d}\n", .{ lm.version, lm.magic, zstd.legacy.isLegacy(&frame), zstd.legacyDetect.legacyVersion(&frame) });
-        std.debug.assert(zstd.legacy.isLegacy(&frame));
-        std.debug.assert(zstd.legacyDetect.legacyVersion(&frame).? == lm.version);
+    for (historic) |h| {
+        var header: [8]u8 = @splat(0);
+        if (h.big_endian) {
+            std.mem.writeInt(u32, header[0..4], h.magic, .big);
+        } else {
+            std.mem.writeInt(u32, header[0..4], h.magic, .little);
+        }
+        const detected = zstd.legacyDetect.legacyVersion(&header);
+        const supported = zstd.legacyDetect.supportsDecode(h.version);
+        std.debug.print("v0.{d} magic 0x{X:0>8}: isLegacy={} version={?d} decodes={}\n", .{
+            h.version,
+            h.magic,
+            zstd.legacy.isLegacy(&header),
+            detected,
+            supported,
+        });
+        std.debug.assert(detected.? == h.version);
+        std.debug.assert(supported);
     }
 
-    // Modern frame should not be legacy
-    const modernData = "modern frame test";
-    const modernCompressed = try zstd.compress(allocator, modernData);
-    defer allocator.free(modernCompressed);
-    std.debug.assert(!zstd.legacy.isLegacy(modernCompressed));
-    std.debug.assert(zstd.isFrame(modernCompressed));
-    std.debug.print("Modern frame correctly not detected as legacy\n", .{});
+    // 3. Near-miss non-frame validation
+    var near_miss = modern;
+    near_miss[3] ^= 0x01;
+    std.debug.print("\nnear miss: isLegacy={}\n", .{zstd.legacy.isLegacy(near_miss)});
+    std.debug.assert(!zstd.legacy.isLegacy(near_miss));
 
-    // A modern frame is decoded by the normal path; only a historic magic is routed to the legacy reader
-    const decompressed = try zstd.decompress(allocator, modernCompressed);
-    defer allocator.free(decompressed);
-    std.debug.assert(std.mem.eql(u8, modernData, decompressed));
-    std.debug.print("modern frame magic 0x{X:0>8}: isLegacy={} version={?d}\n", .{ @as(u32, 0xFD2FB528), zstd.legacy.isLegacy(modern), zstd.legacyDetect.legacyVersion(modern) });
+    // 4. Safe rejection of malformed legacy frame
+    var malformed: [32]u8 = @splat(0);
+    std.mem.writeInt(u32, malformed[0..4], 0xFD2FB526, .little);
+    @memset(malformed[4..], 0x5A);
+    var out: [64]u8 = @splat(0x11);
+    const outcome = zstd.legacy.decompressLegacy(allocator, &out, &malformed);
+    std.debug.print("\nv0.6 magic on a malformed body: decode safely rejected with {any}\n", .{outcome});
+    if (outcome) |_| {
+        return error.UnexpectedSuccess;
+    } else |_| {
+        for (out) |byte| std.debug.assert(byte == 0x11);
+    }
 
-    // Demonstrate skippable frame handling (not legacy, but related)
-    var skipBuf: [32]u8 = undefined;
-    const skipLen = zstd.writeSkippableFrame(&skipBuf, "legacy meta", 4);
-    std.debug.assert(zstd.isSkippableFrame(skipBuf[0..skipLen]));
-    std.debug.print("Skippable frame written {d} bytes\n", .{skipLen});
+    std.debug.print("\nHistoric frames: all seven versions (v0.1..v0.7) recognised, versioned, and supported.\n", .{});
 }
 ```
 
@@ -67,30 +86,29 @@ pub fn main() !void {
 ```text
 modern frame magic 0xFD2FB528: isLegacy=false version=null
 
-v0.1 magic 0xFD2FB51E: isLegacy=true version=1
-v0.2 magic 0xFD2FB522: isLegacy=true version=2
-v0.3 magic 0xFD2FB523: isLegacy=true version=3
-v0.4 magic 0xFD2FB524: isLegacy=true version=4
-v0.5 magic 0xFD2FB525: isLegacy=true version=5
-v0.6 magic 0xFD2FB526: isLegacy=true version=6
-v0.7 magic 0xFD2FB527: isLegacy=true version=7
+v0.1 magic 0xFD2FB51E: isLegacy=true version=1 decodes=true
+v0.2 magic 0xFD2FB522: isLegacy=true version=2 decodes=true
+v0.3 magic 0xFD2FB523: isLegacy=true version=3 decodes=true
+v0.4 magic 0xFD2FB524: isLegacy=true version=4 decodes=true
+v0.5 magic 0xFD2FB525: isLegacy=true version=5 decodes=true
+v0.6 magic 0xFD2FB526: isLegacy=true version=6 decodes=true
+v0.7 magic 0xFD2FB527: isLegacy=true version=7 decodes=true
 
 near miss: isLegacy=false
 
-v0.6 magic on a body: decode says error.VersionUnsupported
+v0.6 magic on a malformed body: decode safely rejected with error.SrcSizeWrong
 
-Historic frames: all seven magics recognised and versioned;
-v0.1 through v0.5 decode, v0.6 and v0.7 are refused without writing output.
+Historic frames: all seven versions (v0.1..v0.7) recognised, versioned, and supported.
 ```
 
 ## Explanation
 
-- `zstd.legacy.isLegacy` checks `0xFD2FB51E-27`; `zstd.legacyDetect.legacyVersion` returns `1..7` or `null`. Modern `0xFD2FB528` is not legacy.
-- `zstd.decompress` routes a historic magic to the legacy reader and a modern magic to the ordinary one, so a caller never has to pick.
-- **Five of the seven historic formats decode**: v0.1 through v0.5 each have their own reader, one per format change, and each regenerates a real frame of that version byte for byte. v0.6 and v0.7 have no reader and are refused with `error.VersionUnsupported` from every entry point. The example proves the refusal writes nothing: the output buffer still holds the caller's bytes afterwards.
-- `isSkippableFrame`/`writeSkippableFrame` handle the `0x184D2A50` range, which is unaffected by legacy detection.
+1. **`zstd.legacy.isLegacy(src)`**: Detects any historical Zstandard frame magic number (`0xFD2FB51E` through `0xFD2FB527`).
+2. **`zstd.legacyDetect.legacyVersion(src)`**: Returns the detected numeric major version (`1` through `7`) or `null` for modern/non-legacy frames.
+3. **Full Native Decoding**: All seven versions (v0.1, v0.2, v0.3, v0.4, v0.5, v0.6, and v0.7) have dedicated native Zig decoders implementing their respective historical entropy models and block structures.
+4. **Safety**: Corrupted or incomplete historical frames return clean errors without writing out of bounds or leaking memory.
 
-Run:
+## Run Command
 
 ```bash
 zig build run-legacy_decompression

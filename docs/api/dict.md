@@ -141,3 +141,10 @@ defer fd.deinit();
 | `getDictIDFromDict` / `getDictIDFromFrame` | `dict.dictId()` / `(try getFrameHeader(src)).dictId` |
 | `trainFromSamples(buf, sizes, cap)` / `finalizeDictionary` | `DictionaryBuilder.train*` / `DictBuilderParams` |
 | `DictParams { compression_level, dictId }` | `DictBuilderParams { dictSize, dictId, level }` |
+
+## Memory Management & Safety
+
+1. **Dictionary Ownership**: `Dictionary` owns its byte slice (`dict.data`). Always release with `defer dict.deinit()`.
+2. **Prepared Dictionary Lifecycle**: Pre-parsed tables in `PreparedDictionary` are owned by the struct and freed on `defer pdict.deinit()`.
+3. **Training Samples**: Sample slices passed to `DictionaryBuilder.train` remain owned by the caller. Training allocates the new dictionary buffer and transfers ownership to the returned `Dictionary`.
+4. **Safety Verification**: Dictionaries validate headers and magic numbers on `loadDictionary`. Mismatched dictionaries are detected cleanly and rejected with `error.DictionaryWrong`.

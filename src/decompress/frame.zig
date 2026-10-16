@@ -50,7 +50,7 @@ pub fn decompressFrame(
             .raw => {
                 if (src.len < srcPos + cSize) return error.SrcSizeWrong;
                 if (dst.len < dstPos + cSize) return error.DstSizeTooSmall;
-                std.mem.copyForwards(u8, dst[dstPos .. dstPos + cSize], src[srcPos .. srcPos + cSize]);
+                @memcpy(dst[dstPos .. dstPos + cSize], src[srcPos .. srcPos + cSize]);
                 checksumState.update(dst[dstPos .. dstPos + cSize]);
                 dstPos += cSize;
                 srcPos += cSize;
@@ -117,7 +117,7 @@ test "decompressFrame round trip and consumed size" {
 
     const unit = "frame-level round trip payload ";
     var payload_buf: [unit.len * 20]u8 = undefined;
-    for (0..20) |i| std.mem.copyForwards(u8, payload_buf[i * unit.len ..][0..unit.len], unit);
+    for (0..20) |i| @memcpy(payload_buf[i * unit.len ..][0..unit.len], unit);
     const payload: []const u8 = &payload_buf;
     const comp = try compress_mod.compress(alloc, payload, .{});
     defer alloc.free(comp);

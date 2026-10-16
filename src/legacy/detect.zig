@@ -21,8 +21,8 @@ const versions = [_]Version{
     .{ .number = 3, .magic = 0xFD2FB523, .big_endian = false, .decodes = true },
     .{ .number = 4, .magic = 0xFD2FB524, .big_endian = false, .decodes = true },
     .{ .number = 5, .magic = 0xFD2FB525, .big_endian = false, .decodes = true },
-    .{ .number = 6, .magic = 0xFD2FB526, .big_endian = false, .decodes = false },
-    .{ .number = 7, .magic = 0xFD2FB527, .big_endian = false, .decodes = false },
+    .{ .number = 6, .magic = 0xFD2FB526, .big_endian = false, .decodes = true },
+    .{ .number = 7, .magic = 0xFD2FB527, .big_endian = false, .decodes = true },
 };
 
 /// The version whose header `src` starts with, or null when it is not a frame

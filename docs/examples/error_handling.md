@@ -1,13 +1,13 @@
 ---
 title: Error Handling
-description: Corruption, truncation and buffer error handling.
+description: Corruption, truncation, and buffer error handling with ZstdError.
 ---
 
 # Error Handling
 
-`examples/error_handling.zig` - deterministic `ZstdError` for malformed data.
+Zstandard operations in `zstd.zig` return strongly-typed errors from the `ZstdError` error set. Corrupted, truncated, or malformed data is rejected safely without panicking, crashing, or triggering undefined behavior.
 
-## Client Code
+## Usage Example
 
 ```zig
 const std = @import("std");
@@ -17,36 +17,43 @@ pub fn main() !void {
     var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
+
+    // 1. Generate valid compressed frame
     const good = try zstd.compress(allocator, "valid data");
     defer allocator.free(good);
+
+    // 2. Test corrupted magic bytes
     var bad = try allocator.dupe(u8, good);
     defer allocator.free(bad);
     bad[0] ^= 0xFF;
+
     const result = zstd.decompress(allocator, bad);
     if (result) |data| {
         defer allocator.free(data);
-        std.debug.print("Unexpected success: {d} bytes\n", .{data.len});
         return error.TestFailed;
     } else |err| {
         std.debug.print("Correctly caught error: {s}\n", .{@errorName(err)});
     }
+
+    // 3. Test truncated input buffer
     const truncated = good[0 .. good.len / 2];
     const r2 = zstd.decompress(allocator, truncated);
     if (r2) |data| {
         defer allocator.free(data);
-        std.debug.print("Unexpected success on truncated\n", .{});
         return error.TestFailed;
     } else |err| {
         std.debug.print("Truncated correctly failed: {s}\n", .{@errorName(err)});
     }
+
+    // 4. Test undersized output buffer
     var small: [2]u8 = undefined;
     const r3 = zstd.decompressInto(allocator, &small, good);
-    if (r3) |sz| {
-        std.debug.print("Unexpected success small buf {d}\n", .{sz});
+    if (r3) |_| {
         return error.TestFailed;
     } else |err| {
         std.debug.print("Small buffer correctly failed: {s}\n", .{@errorName(err)});
     }
+
     std.debug.print("Error handling example complete\n", .{});
 }
 ```
@@ -62,10 +69,12 @@ Error handling example complete
 
 ## Explanation
 
-- Never panics on untrusted input - `PrefixUnknown` (bad magic), `SrcSizeWrong` (truncated `FHD`/`Block_Header`), `DstSizeTooSmall`, `ChecksumWrong`, `Corruption`, `InvalidOffset` are all `ZstdError`.
-- `try zstd.decompress` propagates `error.OutOfMemory` as well.
+1. **`error.PrefixUnknown`**: Returned when the initial bytes do not match the standard Zstandard frame magic (`0xFD2FB528`), a skippable frame magic (`0x184D2A50`..`0x184D2A5F`), or a supported legacy format magic.
+2. **`error.SrcSizeWrong`**: Returned when input data ends abruptly in the middle of a frame header, block header, or Huffman stream.
+3. **`error.DstSizeTooSmall`**: Returned when destination buffers are smaller than the decompressed data.
+4. **`zstd.errorToString(err)`**: Helper that converts any `ZstdError` to a lowercase canonical string identifier.
 
-Run:
+## Run Command
 
 ```bash
 zig build run-error_handling

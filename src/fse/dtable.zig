@@ -46,7 +46,7 @@ pub fn build(
 ) errors.ZstdError!DTable {
     if (tableLog > max_table_log) return error.TableLogTooLarge;
     // The compact header cannot express table logs below 5.
-    if (tableLog < 5) return error.TableLogTooLarge; // FDBG2
+    if (tableLog < 5) return error.TableLogTooLarge;
     const table_size: usize = @as(usize, 1) << @intCast(tableLog);
     const maxSv1 = max_symbol + 1;
 
@@ -61,9 +61,9 @@ pub fn build(
         const c = if (s < norm.len) norm[s] else 0;
         if (c == -1) {
             low_prob_count += 1;
-            if (low_prob_count > table_size) return error.Corruption; // FDBG3
+            if (low_prob_count > table_size) return error.Corruption;
         } else if (c < 0 or c > table_size) {
-            return error.Corruption; // FDBG4
+            return error.Corruption;
         }
     }
 
@@ -96,7 +96,7 @@ pub fn build(
             while (pos > high_threshold) pos = (pos + step) & mask;
         }
     }
-    if (pos != 0) return error.Corruption; // FDBG5 // normalized counter incorrect
+    if (pos != 0) return error.Corruption; // normalized counter incorrect
 
     // Build the decoding table: nbBits and new_state follow the format
     // definition new_state = (next << nbBits) - table_size.

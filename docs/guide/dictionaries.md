@@ -142,3 +142,10 @@ defer fd.deinit();
 zig build run-dictionary_compression
 zig build run-dictionary_training
 ```
+
+## Memory Management & Safety
+
+1. **Dictionary Memory Ownership**: `Dictionary` structures manage their own allocated buffer (`data`). Always call `defer dict.deinit()`.
+2. **Caller Sample Ownership**: Sample byte slices passed into `DictionaryBuilder` are read-only and retained by the caller; training allocates only the resulting dictionary.
+3. **Prepared State Lifecycle**: `PreparedDictionary` instances allocate parsed entropy tables that must be released with `defer prepared_dict.deinit()`.
+4. **Safety Verification**: Dictionaries are validated for corrupt or truncated headers, returning `error.DictionaryCorrupted` or `error.DictionaryWrong` when mismatched.

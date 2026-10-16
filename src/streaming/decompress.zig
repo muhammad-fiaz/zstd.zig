@@ -69,7 +69,7 @@ pub const StreamingDecompressor = struct {
         const avail = self.undelivered().len;
         if (avail == 0) return 0;
         const n = @min(avail, out.len - outProduced);
-        std.mem.copyForwards(u8, out[outProduced..][0..n], self.undelivered()[0..n]);
+        @memcpy(out[outProduced..][0..n], self.undelivered()[0..n]);
         self.delivered += n;
         if (self.delivered == self.blockBuf.items.len) {
             self.blockBuf.clearRetainingCapacity();

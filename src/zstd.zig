@@ -1,16 +1,16 @@
-/// zstd.zig 0.0.4, implementing Zstandard v1.6.0 on Zig 0.17.
+/// zstd.zig 0.0.5, implementing Zstandard v1.6.0 on Zig 0.17.
 /// The caller supplies the allocator. Compression defaults to single-threaded;
 /// worker threads are strictly opt-in via options.workers or MTCompressor.
-pub const version = "0.0.4";
+pub const version = "0.0.5";
 /// Data-format specification implemented (Zstandard v1.6.0).
 const std = @import("std");
 const builtin = @import("builtin");
-const comp = @import("compress/compress.zig");
-const decomp = @import("decompress/decompress.zig");
+const comp_mod = @import("compress/compress.zig");
+const decomp_mod = @import("decompress/decompress.zig");
 const hdr = @import("frame/header.zig");
 const det = @import("frame/detect.zig");
 const frame_mod = @import("decompress/frame.zig");
-const dictionary = @import("dictionary/dictionary.zig");
+const dict_mod = @import("dictionary/dictionary.zig");
 const bld = @import("dictionary/builder.zig");
 const prepared = @import("dictionary/prepared.zig");
 const streamComp = @import("streaming/compress.zig");
@@ -22,8 +22,8 @@ const iterator_mod = @import("frame/iterator.zig");
 const constants = @import("common/constants.zig");
 const errors = @import("common/errors.zig");
 const types = @import("common/types.zig");
-pub const legacy = @import("legacy/decoder.zig");
-pub const legacyDetect = @import("legacy/detect.zig");
+const legacy_decoder = @import("legacy/decoder.zig");
+const legacy_detect = @import("legacy/detect.zig");
 comptime {
     // Test inventory. `zig build test` compiles this file as the test root, and
     // a module that nothing imports would have its tests silently skipped: which
@@ -82,7 +82,7 @@ comptime {
     _ = @import("legacy/layouts.zig");
     _ = @import("legacy/sequences.zig");
     _ = @import("legacy/detect.zig");
-    _ = @import("legacy/v01_entropy.zig");
+    _ = @import("legacy/entropy.zig");
     _ = @import("legacy/v01.zig");
     _ = @import("legacy/v02.zig");
     _ = @import("legacy/v03.zig");
@@ -93,7 +93,7 @@ comptime {
     _ = @import("streaming/compress.zig");
     _ = @import("streaming/decompress.zig");
 }
-pub const CompressionOptions = comp.CompressionOptions;
+pub const CompressionOptions = comp_mod.CompressionOptions;
 pub const DecompressionOptions = dctx.DecompressionOptions;
 pub const CompressionContext = cctx.CompressionContext;
 pub const DecompressionContext = dctx.DecompressionContext;
@@ -110,10 +110,10 @@ pub const pool = @import("common/pool.zig");
 /// Client-side Encoder and Decoder abstractions with explicit lifecycle control.
 pub const Encoder = cctx.Encoder;
 pub const Decoder = dctx.Decoder;
-/// Short aliases matching the reference client naming.
+/// Short aliases matching idiomatic client naming.
 pub const Compressor = cctx.CompressionContext;
 pub const Decompressor = dctx.DecompressionContext;
-pub const Dictionary = dictionary.Dictionary;
+pub const Dictionary = dict_mod.Dictionary;
 pub const DictionaryBuilder = bld.DictionaryBuilder;
 pub const DictBuilderParams = bld.DictBuilderParams;
 /// A dictionary whose reusable state has been prepared: the entropy tables that
@@ -140,10 +140,6 @@ pub const BlockProperties = types.BlockProperties;
 pub const ZstdError = errors.ZstdError;
 /// A lower-case, underscore-separated name for an error, e.g.
 /// `error.ChecksumWrong` becomes `"checksum_wrong"`.
-///
-/// `@errorName` gives the Zig-idiomatic name; this is the wire-format style used
-/// in the specification's error listings, which is what you want when the name is
-/// going into a log or a message that crosses a boundary.
 pub const errorToString = errors.errorToString;
 pub const Strategy = constants.Strategy;
 pub const FrameOptions = struct { checksum: bool = false, contentSize: ?u64 = null, dictId: u32 = 0, windowLog: u8 = 0 };
@@ -156,10 +152,253 @@ pub const CONTENTSIZE_UNKNOWN = constants.contentsize_unknown;
 pub const CONTENTSIZE_ERROR = constants.contentsize_error;
 pub const CLEVEL_DEFAULT = constants.c_level_default;
 pub const MAX_INPUT_SIZE = constants.max_input_size;
-pub const getCompressionParameters = comp.getCompressionParameters;
-pub const loadDictionary = dictionary.loadDictionary;
-pub const createDictionaryFromData = dictionary.createDictionaryFromData;
-pub const decompressWithDict = decomp.decompressWithDict;
+pub const getCompressionParameters = comp_mod.getCompressionParameters;
+pub const loadDictionary = dict_mod.loadDictionary;
+pub const createDictionaryFromData = dict_mod.createDictionaryFromData;
+pub const decompressWithDict = decomp_mod.decompressWithDict;
+
+// Redesigned Module Namespaces (Modern, Idiomatic Zig 0.17 Architecture)
+
+/// Compression namespace: one-shot compression, options, context, and bounds.
+pub const compression = struct {
+    pub const Options = comp_mod.CompressionOptions;
+    pub const Context = cctx.CompressionContext;
+    pub const Strategy = constants.Strategy;
+    pub const Encoder = cctx.Encoder;
+    pub const getParameters = comp_mod.getCompressionParameters;
+    pub const bound = constants.compressBound;
+
+    /// Compresses `src` with explicit options into an allocator-owned buffer.
+    pub fn alloc(allocator: std.mem.Allocator, src: []const u8, options: comp_mod.CompressionOptions) anyerror![]u8 {
+        if (options.workers > 0) {
+            var enc = try cctx.Encoder.init(allocator, options);
+            defer enc.deinit();
+            return try enc.compress(src);
+        }
+        return comp_mod.compress(allocator, src, options);
+    }
+
+    /// Compresses `src` into a caller-provided output buffer `dst`.
+    pub fn into(allocator: std.mem.Allocator, dst: []u8, src: []const u8, options: comp_mod.CompressionOptions) errors.ZstdError!usize {
+        if (options.workers > 0) {
+            var enc = cctx.Encoder.init(allocator, options) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => return error.Corruption,
+            };
+            defer enc.deinit();
+            return enc.compressInto(dst, src) catch |err| switch (err) {
+                error.DstSizeTooSmall => return error.DstSizeTooSmall,
+                error.OutOfMemory => return error.OutOfMemory,
+                else => return error.Corruption,
+            };
+        }
+        return comp_mod.compressInto(allocator, dst, src, options);
+    }
+
+    /// Compresses `src` with default options (level 3).
+    pub fn default(allocator: std.mem.Allocator, src: []const u8) anyerror![]u8 {
+        return comp_mod.compress(allocator, src, .{});
+    }
+
+    /// Compresses `src` at numeric compression `level` (1-22).
+    pub fn withLevel(allocator: std.mem.Allocator, src: []const u8, level: i32) anyerror![]u8 {
+        const opts = comp_mod.getCompressionParameters(level, src.len, 0);
+        return comp_mod.compress(allocator, src, opts);
+    }
+
+    /// Multithreaded compression using explicit worker pool and `std.Io`.
+    pub fn multithreaded(
+        allocator: std.mem.Allocator,
+        io_handle: std.Io,
+        src: []const u8,
+        options: comp_mod.CompressionOptions,
+        workers: usize,
+    ) anyerror![]u8 {
+        return mt.compressMT(allocator, io_handle, src, options, workers);
+    }
+};
+
+/// Decompression namespace: one-shot decompression, options, context, and bounds.
+pub const decompression = struct {
+    pub const Options = dctx.DecompressionOptions;
+    pub const Context = dctx.DecompressionContext;
+    pub const Decoder = dctx.Decoder;
+    pub const bound = decomp_mod.decompressBound;
+
+    /// Decompresses all frames in `src` into an allocator-owned buffer.
+    pub fn alloc(allocator: std.mem.Allocator, src: []const u8, options: dctx.DecompressionOptions) anyerror![]u8 {
+        const dict_content: []const u8 = if (options.dictionary) |d| d.content() else &.{};
+        if (options.requireDictionaryMatch and options.dictionary == null and src.len > 0) {
+            return error.DictionaryWrong;
+        }
+        const b = try decomp_mod.decompressBound(allocator, src);
+        const safe_bound = if (b == 0) src.len * 4 + 1024 else b;
+        const dst = try allocator.alloc(u8, safe_bound);
+        errdefer allocator.free(dst);
+        const out_size = try decomp_mod.decompressIntoDictLimits(allocator, dst, src, dict_content, .{
+            .maxWindowSize = options.maxWindowSize,
+            .forceIgnoreChecksum = options.forceIgnoreChecksum,
+            .dictId = if (options.dictionary) |d| d.dictId() else 0,
+        });
+        if (out_size == dst.len) return dst;
+        return try allocator.realloc(dst, out_size);
+    }
+
+    /// Decompresses all frames in `src` with default options into an allocator-owned buffer.
+    pub fn default(allocator: std.mem.Allocator, src: []const u8) anyerror![]u8 {
+        return decomp_mod.decompress(allocator, src);
+    }
+
+    /// Decompresses all frames in `src` into a caller-provided output buffer `dst`.
+    pub fn into(allocator: std.mem.Allocator, dst: []u8, src: []const u8, options: dctx.DecompressionOptions) errors.ZstdError!usize {
+        const dict_content: []const u8 = if (options.dictionary) |d| d.content() else &.{};
+        return decomp_mod.decompressIntoDictLimits(allocator, dst, src, dict_content, .{
+            .maxWindowSize = options.maxWindowSize,
+            .forceIgnoreChecksum = options.forceIgnoreChecksum,
+            .dictId = if (options.dictionary) |d| d.dictId() else 0,
+        });
+    }
+
+    /// Decompresses exactly one frame into `dst`.
+    pub fn frame(allocator: std.mem.Allocator, dst: []u8, src: []const u8) errors.ZstdError!frame_mod.FrameResult {
+        var state = frame_mod.entropy_mod.State.init(allocator);
+        defer state.deinit();
+        return frame_mod.decompressFrame(&state, dst, src);
+    }
+};
+
+/// Streaming namespace: incremental frame compression and decompression state machines.
+pub const streaming = struct {
+    pub const Compressor = streamComp.StreamingCompressor;
+    pub const Decompressor = streamDecomp.StreamingDecompressor;
+    pub const StreamingCompressor = streamComp.StreamingCompressor;
+    pub const StreamingDecompressor = streamDecomp.StreamingDecompressor;
+    pub const EndDirective = streamComp.EndDirective;
+    pub const CStream = streamComp.CStream;
+    pub const DStream = streamDecomp.DStream;
+};
+
+/// Dictionary namespace: dictionary loading, training, and prepared entropy states.
+pub const dictionary = struct {
+    pub const Dictionary = dict_mod.Dictionary;
+    pub const Builder = bld.DictionaryBuilder;
+    pub const BuilderParams = bld.DictBuilderParams;
+    pub const Prepared = prepared.PreparedDictionary;
+    pub const RepeatOffsets = prepared.RepeatOffsets;
+    pub const EntropyTables = prepared.EntropyTables;
+
+    pub const load = dict_mod.loadDictionary;
+    pub const createFromData = dict_mod.createDictionaryFromData;
+    pub const prepare = prepareDictionary;
+    pub const train = bld.train;
+    pub const trainCover = bld.trainCover;
+    pub const trainFastCover = bld.trainFastCover;
+};
+
+/// Frame namespace: headers, inspection, detection, iteration, and skippable frames.
+pub const frames = struct {
+    pub const Header = types.FrameHeader;
+    pub const Info = FrameInfo;
+    pub const Iterator = iterator_mod.FrameIterator;
+    pub const Item = iterator_mod.Frame;
+    pub const Kind = iterator_mod.FrameKind;
+    pub const BlockType = types.BlockType;
+    pub const BlockProperties = types.BlockProperties;
+    pub const Options = FrameOptions;
+
+    pub const isFrame = det.detectFrame;
+    pub const isZstd = isZstdFrame;
+    pub const isSkippable = hdr.isSkippableFrame;
+    pub const getHeader = hdr.getFrameHeader;
+    pub const getContentSize = getFrameContentSize;
+    pub const getWindowSize = getFrameWindowSize;
+    pub const getDictId = getDictionaryId;
+    pub const getCompressedSize = decomp_mod.findFrameCompressedSize;
+    pub const inspect = inspectFrame;
+    pub const writeSkippable = writeSkippableFrame;
+    pub const readSkippable = readSkippableFrame;
+    pub const skip = frame_mod.skipFrame;
+};
+
+/// Explicit I/O namespace: integration with Zig 0.17.0 std.Io Reader and Writer pipelines.
+pub const io = struct {
+    /// Compresses data streamed from `reader` into `writer` using explicit Zig 0.17.0 std.Io interfaces.
+    pub fn compressPipeline(
+        allocator: std.mem.Allocator,
+        reader: *std.Io.Reader,
+        writer: *std.Io.Writer,
+        level: i32,
+    ) !void {
+        var compressor = try streamComp.StreamingCompressor.init(allocator, level);
+        defer compressor.deinit();
+
+        const in_chunk_size: usize = 16384;
+        var out_buf: [65536]u8 = undefined;
+
+        while (reader.bufferedLen() > 0) {
+            const to_read = @min(in_chunk_size, reader.bufferedLen());
+            const chunk = try reader.take(to_read);
+
+            const res = try compressor.compressStream(&out_buf, chunk, .cont);
+            if (res.outProduced > 0) {
+                try writer.writeAll(out_buf[0..res.outProduced]);
+            }
+        }
+
+        while (true) {
+            const res = try compressor.compressStream(&out_buf, "", .end);
+            if (res.outProduced > 0) {
+                try writer.writeAll(out_buf[0..res.outProduced]);
+            }
+            if (res.remaining == 0) break;
+        }
+    }
+
+    /// Decompresses data streamed from `reader` into `writer` using explicit Zig 0.17.0 std.Io interfaces.
+    pub fn decompressPipeline(
+        allocator: std.mem.Allocator,
+        reader: *std.Io.Reader,
+        writer: *std.Io.Writer,
+    ) !void {
+        var decompressor = streamDecomp.StreamingDecompressor.init(allocator);
+        defer decompressor.deinit();
+
+        const in_chunk_size: usize = 4096;
+        var out_buf: [16384]u8 = undefined;
+
+        while (true) {
+            const chunk = if (reader.bufferedLen() > 0)
+                try reader.take(@min(in_chunk_size, reader.bufferedLen()))
+            else
+                &.{};
+
+            const res = try decompressor.decompressStream(&out_buf, chunk);
+            if (res.outProduced > 0) {
+                try writer.writeAll(out_buf[0..res.outProduced]);
+            }
+            if (reader.bufferedLen() == 0 and res.outProduced == 0) break;
+        }
+    }
+};
+
+/// Legacy format decompression namespace (v0.1 through v0.7).
+pub const legacy = struct {
+    pub const isLegacy = legacy_decoder.isLegacy;
+    pub const detect = legacy_detect.detect;
+    pub const legacyVersion = legacy_detect.legacyVersion;
+    pub const supportsDecode = legacy_detect.supportsDecode;
+    pub const decompressLegacy = legacy_decoder.decompressLegacy;
+    pub const decompress = legacy_decoder.decompressLegacy;
+    pub const findFrameSize = legacy_decoder.findFrameSize;
+    pub const v01 = @import("legacy/v01.zig");
+    pub const v02 = @import("legacy/v02.zig");
+    pub const v03 = @import("legacy/v03.zig");
+    pub const v04 = @import("legacy/v04.zig");
+    pub const v05 = @import("legacy/v05.zig");
+    pub const v06 = @import("legacy/v06.zig");
+    pub const v07 = @import("legacy/v07.zig");
+};
+pub const legacyDetect = legacy_detect;
 /// A reusable compression/decompression context that owns no memory itself:
 /// `allocator` is supplied by the caller and backs every operation for the
 /// lifetime of the context. Create it once, use it for many frames, then
@@ -217,16 +456,16 @@ pub const Context = struct {
 };
 /// Compresses `src` with default options (level 3). Returns an owned slice; the caller frees it with `allocator`.
 pub fn compress(allocator: std.mem.Allocator, src: []const u8) anyerror![]u8 {
-    return comp.compress(allocator, src, .{});
+    return comp_mod.compress(allocator, src, .{});
 }
 /// Decompresses all frames in `src`. Returns an owned slice; the caller frees it with `allocator`.
 pub fn decompress(allocator: std.mem.Allocator, src: []const u8) anyerror![]u8 {
-    return decomp.decompress(allocator, src);
+    return decomp_mod.decompress(allocator, src);
 }
 /// Compresses `src` at numeric `level` (1-22). Returns an owned slice; the caller frees it with `allocator`.
 pub fn compressWithLevel(allocator: std.mem.Allocator, src: []const u8, level: i32) anyerror![]u8 {
-    const opts = comp.getCompressionParameters(level, src.len, 0);
-    return comp.compress(allocator, src, opts);
+    const opts = comp_mod.getCompressionParameters(level, src.len, 0);
+    return comp_mod.compress(allocator, src, opts);
 }
 /// Compresses `src` with explicit `options`. Returns an owned slice; the caller frees it with `allocator`.
 pub fn compressWithOptions(allocator: std.mem.Allocator, src: []const u8, options: CompressionOptions) anyerror![]u8 {
@@ -235,7 +474,7 @@ pub fn compressWithOptions(allocator: std.mem.Allocator, src: []const u8, option
         defer encoder.deinit();
         return try encoder.compress(src);
     }
-    return comp.compress(allocator, src, options);
+    return comp_mod.compress(allocator, src, options);
 }
 /// Compresses `src` into `dst` with explicit `options`, returning bytes written.
 pub fn compressIntoWithOptions(allocator: std.mem.Allocator, dst: []u8, src: []const u8, options: CompressionOptions) ZstdError!usize {
@@ -251,7 +490,7 @@ pub fn compressIntoWithOptions(allocator: std.mem.Allocator, dst: []u8, src: []c
             else => return error.Corruption,
         };
     }
-    return comp.compressInto(allocator, dst, src, options);
+    return comp_mod.compressInto(allocator, dst, src, options);
 }
 /// Decompresses all frames in `src` with explicit `options` (window limits,
 /// checksum handling). Returns an owned slice; the caller frees it with
@@ -263,11 +502,11 @@ pub fn decompressWithOptions(allocator: std.mem.Allocator, src: []const u8, opti
         // decoding a frame that may have been compressed with one.
         return error.DictionaryWrong;
     }
-    const bound = try decomp.decompressBound(allocator, src);
+    const bound = try decomp_mod.decompressBound(allocator, src);
     const safe_bound = if (bound == 0) src.len * 4 + 1024 else bound;
     const dst = try allocator.alloc(u8, safe_bound);
     errdefer allocator.free(dst);
-    const out_size = try decomp.decompressIntoDictLimits(allocator, dst, src, dict_content, .{
+    const out_size = try decomp_mod.decompressIntoDictLimits(allocator, dst, src, dict_content, .{
         .maxWindowSize = options.maxWindowSize,
         .forceIgnoreChecksum = options.forceIgnoreChecksum,
         .dictId = if (options.dictionary) |d| d.dictId() else 0,
@@ -289,8 +528,8 @@ pub fn compressBound(src_size: usize) ZstdError!usize {
 /// a smaller buffer returns `error.DstSizeTooSmall` rather than writing a
 /// partial frame. `allocator` backs scratch only and is not retained.
 pub fn compressInto(allocator: std.mem.Allocator, dst: []u8, src: []const u8, level: i32) ZstdError!usize {
-    const opts = comp.getCompressionParameters(level, src.len, 0);
-    return comp.compressInto(allocator, dst, src, opts);
+    const opts = comp_mod.getCompressionParameters(level, src.len, 0);
+    return comp_mod.compressInto(allocator, dst, src, opts);
 }
 /// Decompress exactly one Zstandard frame into `dst`.
 /// Returns bytes written and total frame size consumed.
@@ -306,15 +545,15 @@ pub fn skipFrame(src: []const u8) ZstdError!usize {
 }
 /// Decompresses all frames in `src` into `dst`. Returns bytes written. `allocator` backs transient tables only.
 pub fn decompressInto(allocator: std.mem.Allocator, dst: []u8, src: []const u8) ZstdError!usize {
-    return decomp.decompressInto(allocator, dst, src);
+    return decomp_mod.decompressInto(allocator, dst, src);
 }
 /// Upper bound on the decompressed size of `src`. Use to size output buffers.
 pub fn decompressBound(allocator: std.mem.Allocator, src: []const u8) ZstdError!usize {
-    return decomp.decompressBound(allocator, src);
+    return decomp_mod.decompressBound(allocator, src);
 }
 /// Exact compressed size of the first frame in `src`, including header and checksum.
 pub fn findFrameCompressedSize(allocator: std.mem.Allocator, src: []const u8) ZstdError!usize {
-    return decomp.findFrameCompressedSize(allocator, src);
+    return decomp_mod.findFrameCompressedSize(allocator, src);
 }
 /// Decompressed size declared by the first frame, or `CONTENTSIZE_UNKNOWN` / `CONTENTSIZE_ERROR` when absent or invalid. Never fails.
 pub fn getFrameContentSize(src: []const u8) u64 {
@@ -384,35 +623,28 @@ pub fn isSkippableFrame(src: []const u8) bool {
 pub fn writeSkippableFrame(dst: []u8, data: []const u8, magicVariant: u32) usize {
     if (dst.len < 8 + data.len) return 0;
     const magic = MAGIC_SKIPPABLE_START + (magicVariant & 0xF);
-    dst[0] = @truncate(magic);
-    dst[1] = @truncate(magic >> 8);
-    dst[2] = @truncate(magic >> 16);
-    dst[3] = @truncate(magic >> 24);
-    const size: u32 = @intCast(data.len);
-    dst[4] = @truncate(size);
-    dst[5] = @truncate(size >> 8);
-    dst[6] = @truncate(size >> 16);
-    dst[7] = @truncate(size >> 24);
-    std.mem.copyForwards(u8, dst[8 .. 8 + data.len], data);
+    std.mem.writeInt(u32, dst[0..4], magic, .little);
+    std.mem.writeInt(u32, dst[4..8], @intCast(data.len), .little);
+    @memcpy(dst[8 .. 8 + data.len], data);
     return 8 + data.len;
 }
 /// Copies the payload of the skippable frame in `src` into `dst`. Returns payload bytes written.
 pub fn readSkippableFrame(dst: []u8, src: []const u8) ZstdError!usize {
     if (src.len < 8) return error.SrcSizeWrong;
     if (!isSkippableFrame(src)) return error.PrefixUnknown;
-    const size: u32 = @as(u32, src[4]) | (@as(u32, src[5]) << 8) | (@as(u32, src[6]) << 16) | (@as(u32, src[7]) << 24);
+    const size = std.mem.readInt(u32, src[4..8], .little);
     if (src.len < 8 + size) return error.SrcSizeWrong;
     if (dst.len < size) return error.DstSizeTooSmall;
-    std.mem.copyForwards(u8, dst[0..size], src[8 .. 8 + size]);
+    @memcpy(dst[0..size], src[8 .. 8 + size]);
     return size;
 }
-/// Library version string ("0.0.4").
+/// Library version string ("0.0.5").
 pub fn versionString() []const u8 {
     return version;
 }
 /// Library version as major*100*100 + minor*100 + patch.
 pub fn versionNumber() u32 {
-    return 4;
+    return 5;
 }
 /// Data-format specification version string ("1.6.0").
 pub fn specVersionString() []const u8 {
@@ -829,7 +1061,7 @@ test "checksum detects single flipped bit" {
     const alloc = testing.allocator;
     const unit = "checksum bit-flip detection payload ";
     var src_buf: [unit.len * 10]u8 = undefined;
-    for (0..10) |i| std.mem.copyForwards(u8, src_buf[i * unit.len ..][0..unit.len], unit);
+    for (0..10) |i| @memcpy(src_buf[i * unit.len ..][0..unit.len], unit);
     const src: []const u8 = &src_buf;
     const c = try compressWithOptions(alloc, src, .{ .checksum = true });
     defer alloc.free(c);
@@ -842,7 +1074,7 @@ test "corrupted payload byte fails via checksum" {
     const alloc = testing.allocator;
     const unit = "payload to corrupt mid-stream for safety checks";
     var src_buf: [unit.len * 5]u8 = undefined;
-    for (0..5) |i| std.mem.copyForwards(u8, src_buf[i * unit.len ..][0..unit.len], unit);
+    for (0..5) |i| @memcpy(src_buf[i * unit.len ..][0..unit.len], unit);
     const src: []const u8 = &src_buf;
     const c = try compressWithOptions(alloc, src, .{ .checksum = true });
     defer alloc.free(c);
@@ -924,7 +1156,7 @@ test "streaming chunk boundaries 1..17 bytes" {
     const alloc = testing.allocator;
     const unit = "chunked streaming boundary sweep for zstd.zig";
     var src_buf: [unit.len * 6]u8 = undefined;
-    for (0..6) |i| std.mem.copyForwards(u8, src_buf[i * unit.len ..][0..unit.len], unit);
+    for (0..6) |i| @memcpy(src_buf[i * unit.len ..][0..unit.len], unit);
     const src: []const u8 = &src_buf;
     const c = try compress(alloc, src);
     defer alloc.free(c);
@@ -2399,6 +2631,70 @@ test "interop: randomized content agrees in both directions" {
         try testing.expect(agreed > 0);
     }
 }
+
+test "interop: exact encoder parity evaluation" {
+    if (interopReference()) |ref| {
+        defer testing.allocator.free(ref);
+        const alloc = testing.allocator;
+
+        const raw_path = try interopScratch(alloc, "zstd_parity_raw.bin");
+        defer {
+            interopDelete(raw_path);
+            alloc.free(raw_path);
+        }
+        const ref_path = try interopScratch(alloc, "zstd_parity_ref.zst");
+        defer {
+            interopDelete(ref_path);
+            alloc.free(ref_path);
+        }
+
+        const cases = [_]struct {
+            name: []const u8,
+            data: []const u8,
+        }{
+            .{ .name = "empty", .data = "" },
+            .{ .name = "single_byte", .data = "x" },
+            .{ .name = "greeting", .data = "Hello, Zstandard parity testing world!" },
+            .{ .name = "rle_repeated", .data = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" },
+        };
+
+        for (cases) |c| {
+            try interopWrite(raw_path, c.data);
+            for ([_]i32{ 1, 3, 7, 19 }) |level| {
+                interopDelete(ref_path);
+                var level_flag: [8]u8 = undefined;
+                const level_text = try std.fmt.bufPrint(&level_flag, "-{d}", .{level});
+
+                const produced = try interopRun(alloc, &.{ ref, "-q", "-f", "--no-check", level_text, raw_path, "-o", ref_path });
+                defer alloc.free(produced.stderr);
+                if (produced.code != 0) continue;
+
+                const ref_frame = try interopRead(alloc, ref_path);
+                defer alloc.free(ref_frame);
+
+                var opts = getCompressionParameters(level, c.data.len, 0);
+                opts.contentSize = c.data.len;
+                opts.checksum = false;
+
+                const zig_frame = try compressWithOptions(alloc, c.data, opts);
+                defer alloc.free(zig_frame);
+
+                // Both decoders must decompress both frames
+                const dec_from_ref = try decompress(alloc, ref_frame);
+                defer alloc.free(dec_from_ref);
+                try testing.expectEqualSlices(u8, c.data, dec_from_ref);
+
+                const dec_from_zig = try decompress(alloc, zig_frame);
+                defer alloc.free(dec_from_zig);
+                try testing.expectEqualSlices(u8, c.data, dec_from_zig);
+
+                test_log.info("parity check: {s: <15} lvl {d: >2}: zig={d: >3}B ref={d: >3}B exact={}\n", .{
+                    c.name, level, zig_frame.len, ref_frame.len, std.mem.eql(u8, zig_frame, ref_frame),
+                });
+            }
+        }
+    }
+}
 test "compressBound covers every one-shot compression" {
     // The whole point of the bound: a buffer of exactly this size must hold the
     // frame whatever the input, so the guarantee is checked by compressing into
@@ -2643,8 +2939,8 @@ test "skippable read wrong magic" {
     try testing.expectError(error.PrefixUnknown, result);
 }
 test "version info" {
-    try testing.expectEqualStrings("0.0.4", versionString());
-    try testing.expectEqual(@as(u32, 4), versionNumber());
+    try testing.expectEqualStrings("0.0.5", versionString());
+    try testing.expectEqual(@as(u32, 5), versionNumber());
     try testing.expectEqualStrings("1.6.0", specVersionString());
     try testing.expectEqual(@as(u32, 1 * 100 * 100 + 6 * 100), specVersionNumber());
     try testing.expect(maxCLevel() == 22);
@@ -2703,8 +2999,8 @@ test "concatenated frames" {
     defer alloc.free(c2);
     var concat = try alloc.alloc(u8, c1.len + c2.len);
     defer alloc.free(concat);
-    std.mem.copyForwards(u8, concat[0..c1.len], c1);
-    std.mem.copyForwards(u8, concat[c1.len..], c2);
+    @memcpy(concat[0..c1.len], c1);
+    @memcpy(concat[c1.len..], c2);
     const d = try decompress(alloc, concat);
     defer alloc.free(d);
     try testing.expectEqualStrings(src1, d[0..src1.len]);
@@ -3117,4 +3413,61 @@ test "canonical golden dictionary in-memory frame" {
     const restored = try decompressWithOptions(alloc, compressed, .{ .dictionary = &dict });
     defer alloc.free(restored);
     try testing.expectEqualStrings(sample, restored);
+}
+
+test "public api namespace coverage" {
+    const alloc = testing.allocator;
+    const original = "Testing redesigned public API namespaces: compress, decompress, streaming, io, frame, legacy!";
+
+    // 1. zstd.compression namespace
+    const compressed = try compression.alloc(alloc, original, .{ .level = 4 });
+    defer alloc.free(compressed);
+
+    var dst_buf: [256]u8 = undefined;
+    const compressed_len = try compression.into(alloc, &dst_buf, original, .{ .level = 4 });
+    try testing.expect(compressed_len > 0);
+
+    // 2. zstd.frames namespace
+    try testing.expect(frames.isZstd(compressed));
+    const header = try frames.getHeader(compressed);
+    try testing.expectEqual(@as(u64, original.len), header.contentSize);
+
+    // 3. zstd.decompression namespace
+    const decompressed = try decompression.alloc(alloc, compressed, .{});
+    defer alloc.free(decompressed);
+    try testing.expectEqualStrings(original, decompressed);
+
+    var out_buf: [256]u8 = undefined;
+    const decomp_len = try decompression.into(alloc, &out_buf, compressed, .{});
+    try testing.expectEqualStrings(original, out_buf[0..decomp_len]);
+
+    // 4. zstd.streaming namespace
+    var s_comp = try streaming.StreamingCompressor.init(alloc, 3);
+    defer s_comp.deinit();
+    var s_out: [512]u8 = undefined;
+    const c_res = try s_comp.compressStream(&s_out, original, .end);
+    try testing.expect(c_res.outProduced > 0);
+
+    var s_decomp = streaming.StreamingDecompressor.init(alloc);
+    defer s_decomp.deinit();
+    var s_plain: [512]u8 = undefined;
+    const d_res = try s_decomp.decompressStream(&s_plain, s_out[0..c_res.outProduced]);
+    try testing.expectEqualStrings(original, s_plain[0..d_res.outProduced]);
+
+    // 5. zstd.io namespace
+    var in_stream = std.Io.Reader.fixed(original);
+    var compressed_storage = std.Io.Writer.Allocating.init(alloc);
+    defer compressed_storage.deinit();
+
+    try io.compressPipeline(alloc, &in_stream, &compressed_storage.writer, 3);
+
+    var comp_reader = std.Io.Reader.fixed(compressed_storage.written());
+    var decomp_storage = std.Io.Writer.Allocating.init(alloc);
+    defer decomp_storage.deinit();
+
+    try io.decompressPipeline(alloc, &comp_reader, &decomp_storage.writer);
+    try testing.expectEqualStrings(original, decomp_storage.written());
+
+    // 6. zstd.legacy namespace
+    try testing.expect(!legacy.isLegacy(compressed));
 }

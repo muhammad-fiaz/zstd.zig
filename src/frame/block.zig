@@ -2,12 +2,11 @@ const errors = @import("../common/errors.zig");
 const types = @import("../common/types.zig");
 const constants = @import("../common/constants.zig");
 
+const std = @import("std");
+
 pub fn getBlockHeader(src: []const u8) errors.ZstdError!types.BlockProperties {
     if (src.len < 3) return error.SrcSizeWrong;
-    const b0 = src[0];
-    const b1 = src[1];
-    const b2 = src[2];
-    const header: u32 = @as(u32, b0) | (@as(u32, b1) << 8) | (@as(u32, b2) << 16);
+    const header: u32 = std.mem.readInt(u24, src[0..3], .little);
     const lastBlock = (header & 1) != 0;
     const block_type_raw = (header >> 1) & 0x3;
     const blockType: types.BlockType = switch (block_type_raw) {
@@ -27,13 +26,11 @@ pub fn getBlockHeader(src: []const u8) errors.ZstdError!types.BlockProperties {
 }
 
 pub fn writeBlockHeader(buf: []u8, last: bool, blockType: types.BlockType, size: u32) void {
-    var header: u32 = 0;
+    var header: u24 = 0;
     if (last) header |= 1;
-    header |= (@as(u32, @backingInt(blockType)) & 0x3) << 1;
-    header |= (size << 3);
-    buf[0] = @truncate(header);
-    buf[1] = @truncate(header >> 8);
-    buf[2] = @truncate(header >> 16);
+    header |= (@as(u24, @intCast(@backingInt(blockType))) & 0x3) << 1;
+    header |= (@as(u24, @truncate(size)) << 3);
+    std.mem.writeInt(u24, buf[0..3], header, .little);
 }
 
 pub fn getCBlockSize(src: []const u8) errors.ZstdError!usize {

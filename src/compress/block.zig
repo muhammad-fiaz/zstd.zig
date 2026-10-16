@@ -33,12 +33,16 @@ pub const FrameEntropy = struct {
     reps: RepHistory = .{},
     /// Literals table plus the scratch the literals encoder needs.
     literals: huff.LiteralsState = .{},
+    /// Avoid emitting RLE for the first block of a frame
+    /// to preserve compatibility with historical decoders.
+    is_first_block: bool = true,
 
     /// Called when a frame completes: the decoder drops both the repeat
     /// offsets and the literals table.
     pub fn reset(self: *FrameEntropy) void {
         self.reps = .{};
         self.literals.reset();
+        self.is_first_block = true;
     }
 };
 
@@ -128,7 +132,9 @@ fn compressBlockWithConfig(
         frame_block.writeBlockHeader(dst[0..3], is_last, .raw, 0);
         return 3;
     }
-    if (isRle(src)) {
+    const is_first = entropy.is_first_block;
+    entropy.is_first_block = false;
+    if (!is_first and isRle(src)) {
         if (dst.len < 4) return error.DstSizeTooSmall;
         frame_block.writeBlockHeader(dst[0..3], is_last, .rle, @intCast(src.len));
         dst[3] = src[0];
@@ -221,7 +227,7 @@ fn compressBlockWithConfig(
     // decoder keeping its table across a raw or RLE literals block.
     entropy.reps = local_reps;
     frame_block.writeBlockHeader(dst[0..3], is_last, .compressed, @intCast(c_len));
-    std.mem.copyForwards(u8, dst[3 .. 3 + c_len], body.items);
+    @memcpy(dst[3 .. 3 + c_len], body.items);
     return 3 + c_len;
 }
 
@@ -332,7 +338,7 @@ fn writeExtraBits(sq: Seq, llc: u8, mlc: u8, bc: *bitstream_mod.BIT_CStream) voi
 fn rawFallback(dst: []u8, src: []const u8, is_last: bool) errors.ZstdError!usize {
     if (dst.len < src.len + 3) return error.DstSizeTooSmall;
     frame_block.writeBlockHeader(dst[0..3], is_last, .raw, @intCast(src.len));
-    std.mem.copyForwards(u8, dst[3 .. 3 + src.len], src);
+    @memcpy(dst[3 .. 3 + src.len], src);
     return 3 + src.len;
 }
 
@@ -503,7 +509,9 @@ test "a block that hits the sequence cap still covers the input exactly" {
     // is what drives the sequence count past the cap.
     for (&src) |*b| b.* = random.intRangeAtMost(u8, 0, 3);
     var local = RepHistory{};
-    var found = try findSequences(alloc, &src, 0, search.paramsForStrategy(.fast, 1), &search.SequencePrices.init(), &local, null);
+    var search_params = search.paramsForStrategy(.fast, 1);
+    search_params.minMatch = 4;
+    var found = try findSequences(alloc, &src, 0, search_params, &search.SequencePrices.init(), &local, null);
     defer found.deinit(alloc);
     try testing.expectEqual(search.max_sequences, found.seqs.len);
     var sumLl: usize = 0;

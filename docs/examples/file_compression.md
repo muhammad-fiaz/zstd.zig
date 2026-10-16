@@ -1,13 +1,13 @@
 ---
 title: File Compression
-description: Real file compression to .zst archive and decompression.
+description: Real file compression to .zst archive and decompression with std.Io.Dir in Zig 0.17.
 ---
 
 # File Compression
 
-`examples/file_compression.zig` - `std.Io.Dir` + `zstd` file workflow (Zig 0.17).
+This example demonstrates compressing real files on disk into `.zst` archives and restoring them using Zig 0.17.0's explicit `std.Io.Dir` filesystem API. It also illustrates a complete directory compression and decompression workflow.
 
-## Client Code
+## Usage Example
 
 ```zig
 const std = @import("std");
@@ -185,13 +185,13 @@ pub fn main(init: std.process.Init) !void {
 
 ```text
 1. Created source file 'example_input.txt' (616 bytes)
-2. Compressed 'example_input.txt' -> 'example_output.txt.zst' (616 -> 353 bytes, ratio: 57.31%)
+2. Compressed 'example_input.txt' -> 'example_output.txt.zst' (616 -> 349 bytes, ratio: 56.66%)
 3. Decompressed 'example_output.txt.zst' -> 'example_restored.txt' (616 bytes)
 4. Verified restored file matches original exactly!
 
 --- Directory Compression & Decompression ---
 1. Created directory 'example_src_dir' with 3 source files
-2. Compressed 'config.json' (65 B) -> 'config.json.zst' (69 B)
+2. Compressed 'config.json' (65 B) -> 'config.json.zst' (71 B)
 2. Compressed 'metrics.log' (89 B) -> 'metrics.log.zst' (88 B)
 2. Compressed 'payload.txt' (102 B) -> 'payload.txt.zst' (111 B)
 3. Restored & verified 'config.json' (65 B) bit-for-bit
@@ -202,11 +202,11 @@ pub fn main(init: std.process.Init) !void {
 
 ## Explanation
 
-- Uses new Zig 0.17 `std.Io` (`Dir.cwd()`, `createDirPath`, `writeFile`, `openFile`, `stat`, `readPositionalAll`, `deleteFile`, `deleteDir`).
-- Demonstrates both single file lifecycle and full directory structure compression and decompression with bit-for-bit verification.
-- `zstd.compress` and `zstd.decompress` operate natively with zero external dependencies.
+1. **`std.Io.Dir` Integration**: Uses Zig 0.17 explicit `std.Io` (`Dir.cwd()`, `createDirPath`, `writeFile`, `openFile`, `stat`, `readPositionalAll`).
+2. **Standard `.zst` Archives**: Compressed files written to disk can be inspected or extracted with standard tools or decompressed natively via `zstd.decompress`.
+3. **Directory Tree Processing**: Demonstrates iterating directory structures, compressing individual assets, and reconstructing them losslessly.
 
-Run:
+## Run Command
 
 ```bash
 zig build run-file_compression

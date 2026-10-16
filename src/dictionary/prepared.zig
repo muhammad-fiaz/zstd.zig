@@ -110,7 +110,7 @@ pub const PreparedDictionary = struct {
         errdefer allocator.free(buf);
         bits.writeLe32(buf[0..4], constants.magic_dictionary);
         bits.writeLe32(buf[4..8], id);
-        std.mem.copyForwards(u8, buf[8..], body);
+        @memcpy(buf[8..], body);
         return .{
             .data = buf,
             .id = id,
@@ -129,7 +129,7 @@ pub const PreparedDictionary = struct {
     pub fn prepare(allocator: std.mem.Allocator, source: []const u8) errors.ZstdError!PreparedDictionary {
         const buf = try allocator.alloc(u8, source.len);
         errdefer allocator.free(buf);
-        std.mem.copyForwards(u8, buf, source);
+        @memcpy(buf, source);
 
         const has_magic = buf.len >= 8 and bits.readLe32(buf[0..4]) == constants.magic_dictionary;
         if (!has_magic) {
@@ -442,12 +442,10 @@ test "preparation is reusable across many inputs" {
         try testing.expectEqual(@as(u32, 99), prepared.id);
     }
 }
-// ---------------------------------------------------------------------------
-// Loading a dictionary another implementation produced
+
+// Loading a pre-trained dictionary
 //
-// The fixture below was produced by the reference tool and kept verbatim, so this
-// is a real interoperability check rather than a round trip with ourselves.
-// ---------------------------------------------------------------------------
+// The fixture below was verified for interoperability.
 
 test "a reference-trained dictionary loads and keeps its ID" {
     const alloc = testing.allocator;
@@ -528,7 +526,7 @@ test "an empty and a zero-ID dictionary both prepare" {
     try testing.expectEqual(@as(usize, 1), small.content().len);
     try testing.expectEqual(@as(u32, 1), small.id);
 }
-// ---------------------------------------------------------------------------
+
 // Reuse: the reason preparation exists
 //
 // Every test below reuses one prepared dictionary across independent operations,

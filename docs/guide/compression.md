@@ -44,9 +44,13 @@ Levels are plain `i32`, range `-131072` to `22` (see `constants.c_level_min/max`
 ```zig
 // Numeric levels 1-22 (and negative levels for fast modes)
 const fast = try zstd.compressWithLevel(allocator, data, 1);
+defer allocator.free(fast);
 const balanced = try zstd.compressWithLevel(allocator, data, 3);
+defer allocator.free(balanced);
 const best = try zstd.compressWithLevel(allocator, data, 19);
+defer allocator.free(best);
 const custom = try zstd.compressWithLevel(allocator, data, 12);
+defer allocator.free(custom);
 
 // Helpers
 const min = zstd.minCLevel();     // -131072
@@ -60,7 +64,7 @@ const def = zstd.defaultCLevel(); // 3
 pub fn compressWithLevel(allocator: std.mem.Allocator, src: []const u8, level: i32) anyerror![]u8
 ```
 
-> **Note:** There is no `CLevel` enum. Earlier docs referenced `CLevel.fastest/default/best`; use plain `i32` instead.
+> **Note:** Compression levels are plain `i32` values (e.g. `constants.c_level_default`, or 1 to 22).
 
 ## CompressionOptions
 
@@ -188,5 +192,17 @@ Enable frame checksum for data integrity verification:
 ```zig
 const opts = zstd.CompressionOptions{ .checksum = true };
 const compressed = try zstd.compressWithOptions(allocator, data, opts);
+defer allocator.free(compressed);
 // The decompressor will verify the checksum automatically; use DecompressionOptions.forceIgnoreChecksum to skip
 ```
+
+## Memory Management & Safety
+
+1. **Client-Controlled Allocations**: Every dynamic allocation in the compression pipeline requires an explicit caller-passed `allocator: std.mem.Allocator`.
+2. **Buffer Lifetime Management**: All compressed byte slices returned by `compress*` functions are managed and freed by the caller via `defer allocator.free(slice)`.
+3. **Zero-Allocation Fixed Buffer Compression**:
+   - `compressBound(src.len)` provides a mathematical upper bound on the compressed frame size.
+   - `compressInto(allocator, dst, src, level)` compresses directly into the caller's pre-allocated `dst` slice, returning bytes written and performing zero allocations for output storage.
+4. **Safety & Bounds Protection**:
+   - Input sizes exceeding architectural limits are caught immediately with `error.SrcSizeTooLarge`.
+   - Small destination buffers return `error.DstSizeTooSmall` without buffer overflows.

@@ -98,9 +98,9 @@ pub const BIT_CStream = struct {
         if (self.ptr + 8 <= self.buf.len) {
             bits.writeLe64(self.buf[self.ptr..][0..8], self.bitContainer);
         } else {
-            for (0..nbBytes) |i| {
-                self.buf[self.ptr + i] = @truncate(self.bitContainer >> @as(shift_t, @intCast(i * 8)));
-            }
+            var tmp: [8]u8 = undefined;
+            std.mem.writeInt(u64, &tmp, self.bitContainer, .little);
+            @memcpy(self.buf[self.ptr..][0..nbBytes], tmp[0..nbBytes]);
         }
         self.ptr += nbBytes;
         self.bitContainer >>= @as(shift_t, @intCast(nbBytes * 8));
@@ -176,13 +176,9 @@ pub const BIT_DStream = struct {
             stream.bitsConsumed = padding;
             return stream;
         }
-        // Short stream: build a container whose low bytes are the whole input,
-        // zero-padded on the right, and account for the missing high bytes.
-        var container: Container = 0;
-        for (src, 0..) |b, i| {
-            container |= @as(Container, b) << @as(shift_t, @intCast(i * 8));
-        }
-        stream.bitContainer = container;
+        var tmp: [8]u8 = @splat(0);
+        @memcpy(tmp[0..src.len], src);
+        stream.bitContainer = std.mem.readInt(u64, &tmp, .little);
         stream.bitsConsumed = padding + @as(u32, @intCast((8 - src.len) * 8));
         return stream;
     }
@@ -219,10 +215,7 @@ pub const BIT_DStream = struct {
             switch (self.reload()) {
                 .unfinished => continue,
                 .end_of_buffer, .completed => return false,
-                .overflow => {
-                    std.debug.print("DBG ensure fail n={d} consumed={d} ptr={d} len={d}\n", .{ nbBits, self.bitsConsumed, self.ptr, self.src.len });
-                    return false;
-                },
+                .overflow => return false,
             }
         }
         return true;

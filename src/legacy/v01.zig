@@ -2,7 +2,7 @@ const std = @import("std");
 const bits = @import("../common/bits.zig");
 const errors = @import("../common/errors.zig");
 const decoder = @import("decoder.zig");
-const v01_entropy = @import("v01_entropy.zig");
+const entropy = @import("entropy.zig");
 
 /// A block's regenerated output never exceeds the block size cap.
 const max_block_output: usize = 128 * 1024;
@@ -31,8 +31,9 @@ const BlockHeader = struct {
 /// first byte are its top bits, so the field spans the header.
 fn readBlockHeader(src: []const u8) errors.ZstdError!BlockHeader {
     if (src.len < block_header_size) return error.SrcSizeWrong;
-    const flags = src[0];
-    const size: usize = @as(usize, src[2]) | (@as(usize, src[1]) << 8) | (@as(usize, flags & 7) << 16);
+    const raw = std.mem.readInt(u24, src[0..3], .big);
+    const flags: u8 = @truncate(raw >> 16);
+    const size: usize = raw & 0x07FFFF;
     const block_type: BlockType = @fromBackingInt(@intCast(@as(u2, @truncate(flags >> 6))));
     return .{
         .block_type = block_type,
@@ -82,7 +83,7 @@ pub fn decompress(allocator: std.mem.Allocator, dst: []u8, src: []const u8) erro
             .raw => {
                 if (src.len < pos + header.payload) return error.SrcSizeWrong;
                 if (dst.len < out + header.payload) return error.DstSizeTooSmall;
-                std.mem.copyForwards(u8, dst[out .. out + header.payload], src[pos .. pos + header.payload]);
+                @memcpy(dst[out .. out + header.payload], src[pos .. pos + header.payload]);
                 out += header.payload;
                 pos += header.payload;
             },
@@ -153,7 +154,7 @@ fn decompressCompressed(
             const high_bits: usize = (block[0] >> 3) & 7;
             lit_size = (high_bits << 16) | (@as(usize, payload[0]) << 8) | payload[1];
             if (lit_size > max_block_output or lit_header.payload < 2) return error.Corruption;
-            const ok = v01_entropy.decompressLiterals(allocator, scratch[0..lit_size], payload[2..]) catch |e| {
+            const ok = entropy.decompressLiterals(allocator, scratch[0..lit_size], payload[2..]) catch |e| {
                 return e;
             };
             if (ok.written != lit_size) return error.Corruption;
@@ -166,7 +167,7 @@ fn decompressCompressed(
     // exactly the block's output: every literal is either consumed by a
     // sequence's literal run or emitted as the trailing run, and every match
     // contributes its own bytes.
-    const decoded = v01_entropy.decodeSequences(allocator, block[lit_pos..]) catch |e| return e;
+    const decoded = entropy.decodeSequences(allocator, block[lit_pos..]) catch |e| return e;
     defer allocator.free(decoded.sequences);
     {
         // Only a bound: it says the total must fit, which is a real check because a
@@ -185,7 +186,7 @@ fn decompressCompressed(
         const match_length: usize = sequence.match_length;
         if (out + lit_length + match_length > dst.len) return error.DstSizeTooSmall;
         if (lit_read + lit_length > lit_size) return error.Corruption;
-        std.mem.copyForwards(u8, dst[out .. out + lit_length], scratch[lit_read .. lit_read + lit_length]);
+        @memcpy(dst[out .. out + lit_length], scratch[lit_read .. lit_read + lit_length]);
         out += lit_length;
         lit_read += lit_length;
         const offset: usize = sequence.offset;
@@ -207,7 +208,7 @@ fn decompressCompressed(
     // larger than this block's literals, so the copy is bounded by the literal
     // count rather than taking the rest of the buffer - otherwise the copy would
     // read past what was actually regenerated.
-    std.mem.copyForwards(u8, dst[out .. out + tail], scratch[lit_read..lit_size]);
+    @memcpy(dst[out .. out + tail], scratch[lit_read..lit_size]);
     return out + tail;
 }
 const testing = std.testing;
@@ -315,7 +316,7 @@ test "v01: the literal section of a real frame is laid out and sized" {
     // regenerating 216 bytes, an FSE-compressed weight description (31 bytes)
     // over a table of log 5 and 8 symbols, and a 19-byte sequence section.
     const block = golden.frame_v01[7..];
-    const lit_size: usize = block[2] | (@as(usize, block[1]) << 8) | (@as(usize, block[0] & 7) << 16);
+    const lit_size: usize = std.mem.readInt(u24, block[0..3], .big) & 0x07FFFF;
     try testing.expectEqual(@as(usize, 157), lit_size);
     try testing.expectEqual(@as(u8, 0), block[0] >> 6); // literals are Huffman-coded
 
@@ -323,7 +324,7 @@ test "v01: the literal section of a real frame is laid out and sized" {
     // Huffman stream starts after those two bytes.
     const payload = block[3 .. 3 + lit_size];
     const high_bits: usize = (block[0] >> 3) & 7;
-    const regenerated: usize = (high_bits << 16) | (@as(usize, payload[0]) << 8) | payload[1];
+    const regenerated: usize = (high_bits << 16) | std.mem.readInt(u16, payload[0..2], .big);
     try testing.expectEqual(@as(usize, 216), regenerated);
     try testing.expectEqual(@as(usize, 31), payload[2]); // weight description size
 }
@@ -333,7 +334,7 @@ test "v01: the literal body is four streams behind a length table" {
     // streams interleaved one byte per stream round-robin, not one bitstream.
     // Reading it as a single stream produces text-shaped nonsense.
     const block = golden.frame_v01[7..];
-    const lit_size: usize = block[2] | (@as(usize, block[1]) << 8) | (@as(usize, block[0] & 7) << 16);
+    const lit_size: usize = std.mem.readInt(u24, block[0..3], .big) & 0x07FFFF;
     const payload = block[3 .. 3 + lit_size];
     // The description is a length byte followed by that many bytes of table
     // data, so the bitstreams start one byte later than the length implies.

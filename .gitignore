@@ -26,7 +26,7 @@ large_decompressed.txt
 .idea/
 *.swp
 *~
-# Reference C implementation checkout (local only)
+# Local test checkout
 zstd/
 temp_*.py
 *.bin

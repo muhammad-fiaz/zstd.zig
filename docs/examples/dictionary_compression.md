@@ -1,21 +1,19 @@
 ---
 title: Dictionary Compression
-description: Training a dictionary, compressing against it, and decoding with it.
+description: Training a dictionary, compressing small records against it, and decoding with it.
 ---
 
 # Dictionary Compression
 
-`examples/dictionary_compression.zig`
+Dictionary compression dramatically improves compression ratios on small, repetitive records (such as HTTP requests, JSON documents, or database tuples). The dictionary acts as shared history that precedes each payload, allowing matches to reference shared strings directly.
 
-A dictionary is content that logically precedes the data. The encoder may match
-back into it, so a payload sharing its phrasing costs far fewer bytes. The frame
-records the dictionary's ID, and a decoder must be given the same dictionary to
-reproduce the frame - without it, the frame cannot be decoded at all, because its
-matches point into content the decoder does not have.
-
-## Source
+## Usage Example
 
 ```zig
+const std = @import("std");
+const zstd = @import("zstd");
+
+/// Generate a sample corpus of HTTP requests with repetitive structure
 fn corpus(allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
     var samples: std.ArrayList([]const u8) = .empty;
     errdefer samples.deinit(allocator);
@@ -38,13 +36,13 @@ pub fn main() !void {
         samples.deinit(allocator);
     }
 
-    // Training picks the parts of the corpus that recur, so the dictionary holds
-    // the request line and the headers rather than one whole request.
+    // Train a dictionary from the sample corpus
     var builder = zstd.DictionaryBuilder.init(allocator, .{ .dictSize = 1024, .dictId = 0xC0FFEE });
     var dict = try builder.train(samples.items);
     defer dict.deinit();
+    std.debug.print("dictionary: {d} bytes, id {d}, from {d} samples\n\n", .{ dict.content().len, dict.dictId(), samples.items.len });
 
-    // A payload the dictionary has never seen, but which shares its phrasing.
+    // A payload that shares phrasing with the corpus
     const payload = "GET /api/v1/orders?status=open&page=99 HTTP/1.1\r\nHost: api.example.com\r\nAccept: application/json\r\n";
 
     const without = try zstd.compressWithOptions(allocator, payload, .{ .level = 9 });
@@ -52,17 +50,27 @@ pub fn main() !void {
     const with_dict = try zstd.compressWithOptions(allocator, payload, .{ .level = 9, .dictionary = &dict });
     defer allocator.free(with_dict);
 
-    // The frame records which dictionary it needs, so a decoder can tell.
-    const header = try zstd.getFrameHeader(with_dict);
+    std.debug.print("{d} bytes of request text\n", .{payload.len});
+    std.debug.print("  without a dictionary: {d} bytes\n", .{without.len});
+    std.debug.print("  with    a dictionary: {d} bytes\n", .{with_dict.len});
 
-    // Decoding needs the same dictionary.
+    // The frame header records the dictionary ID required to decode it
+    const header = try zstd.getFrameHeader(with_dict);
+    std.debug.print("  frame dictionary id:  {d}\n\n", .{header.dictId});
+
+    // Decompress with dictionary attached
     const restored = try zstd.decompressWithOptions(allocator, with_dict, .{ .dictionary = &dict });
     defer allocator.free(restored);
+    if (!std.mem.eql(u8, payload, restored)) {
+        return error.RoundTripFailed;
+    }
 
-    // Without it the frame cannot be decoded.
+    // Decoding without dictionary correctly fails
     if (zstd.decompress(allocator, with_dict)) |_| {
         return error.ShouldHaveFailed;
     } else |_| {}
+
+    std.debug.print("Verified dictionary round trip\n", .{});
 }
 ```
 
@@ -79,29 +87,13 @@ dictionary: 1024 bytes, id 12648430, from 64 samples
 Verified dictionary round trip
 ```
 
-## API used
+## Explanation
 
-| Call | Role |
-|---|---|
-| `zstd.DictionaryBuilder.init(allocator, params)` | Builder with `dictSize` and `dictId` |
-| `builder.train(samples)` | Trains and returns a `Dictionary` |
-| `dict.content()` | The trained content, without any header |
-| `dict.dictId()` | The ID a frame made with it will record |
-| `zstd.compressWithOptions(..., .{ .dictionary = &dict })` | Compress with the dictionary available for matching |
-| `zstd.getFrameHeader(frame)` | Reads back the `dictId` the frame declares |
-| `zstd.decompressWithOptions(..., .{ .dictionary = &dict })` | Decode, which requires the same dictionary |
+1. **Dramatic Size Savings**: For a 98-byte payload, compressing without a dictionary produces a 100-byte frame due to header overhead. With the trained dictionary, the size drops to 26 bytes (nearly a 4x reduction).
+2. **`dictId` Header Tracking**: The frame header records the dictionary ID (e.g. `12648430`), allowing decoders to verify they have the appropriate dictionary loaded.
+3. **Integrity Enforcement**: Attempting to decompress a dictionary-encoded frame without providing the dictionary is safely rejected.
 
-## Notes
-
-- The payload here is 98 bytes and compresses to 100 without a dictionary: the
-  frame header alone costs more than the content. The dictionary version is 26.
-  A dictionary earns its place on small payloads that share phrasing with it, not
-  on large ones.
-- The final check is the important one. `zstd.decompress` on a dictionary frame
-  must fail; a decoder that silently produced output would be reading matches
-  against content it does not have.
-
-Run:
+## Run Command
 
 ```bash
 zig build run-dictionary_compression

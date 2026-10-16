@@ -97,8 +97,7 @@ fn findFrameSizeBlocks(src: []const u8, fh: types.FrameHeader) errors.ZstdError!
         }
     }
     if (fh.checksumFlag) {
-        // The four checksum bytes must be present, matching upstream
-        // ZSTD_findFrameSizeInfo: a truncated checksum is srcSize_wrong.
+        // The four checksum bytes must be present: a truncated checksum is SrcSizeWrong.
         if (src.len < pos + 4) return error.SrcSizeWrong;
         pos += 4;
     }
@@ -223,7 +222,7 @@ pub fn decompressIntoLimits(
                 .raw => {
                     if (src.len < frameSrcPos + cSize) return error.SrcSizeWrong;
                     if (dst.len < dstPos + cSize) return error.DstSizeTooSmall;
-                    std.mem.copyForwards(u8, dst[dstPos .. dstPos + cSize], src[frameSrcPos .. frameSrcPos + cSize]);
+                    @memcpy(dst[dstPos .. dstPos + cSize], src[frameSrcPos .. frameSrcPos + cSize]);
                     checksumState.update(dst[dstPos .. dstPos + cSize]);
                     dstPos += cSize;
                     frameSrcPos += cSize;
@@ -300,7 +299,6 @@ const compress_mod = @import("../compress/compress.zig");
 // caller-supplied limit. The limit must be exact: a frame one byte over is
 // refused, one exactly on it accepted, and it applies per frame, not per stream.
 // These pin the boundary from both sides on every path that can enforce it.
-// ---------------------------------------------------------------------------
 
 const window_dict = @import("../dictionary/dictionary.zig");
 const stream_decompress = @import("../streaming/decompress.zig");

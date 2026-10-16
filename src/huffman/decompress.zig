@@ -192,14 +192,14 @@ pub fn readStats(
 
     // The table log is one above the position of the highest set bit of the
     // total weight; the leftover cells are filled by exactly one more symbol.
-    const tableLog: u8 = @intCast(@as(u32, @intCast(31 - @clz(weightTotal))) + 1);
+    const tableLog: u8 = @intCast(std.math.log2_int(u32, weightTotal) + 1);
     if (tableLog > max_table_log) return error.Corruption;
     table_log_ptr.* = tableLog;
 
     const total: u32 = @as(u32, 1) << @as(std.math.Log2Int(u32), @intCast(tableLog));
     const rest = total - weightTotal;
     if (rest == 0 or (rest & (rest - 1)) != 0) return error.Corruption;
-    const lastWeight: u8 = @intCast(@as(u32, @intCast(31 - @clz(rest))) + 1);
+    const lastWeight: u8 = @intCast(std.math.log2_int(u32, rest) + 1);
     if (oSize + 1 > huffWeight.len) return error.Corruption;
     huffWeight[oSize] = lastWeight;
     rankStats[lastWeight] += 1;

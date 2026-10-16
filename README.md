@@ -30,7 +30,7 @@
 > If you build with zstd.zig, make sure to give it a star!
 
 > [!NOTE]
-> `zstd.zig` implements the RFC 8878 format specification. The upstream [Zstandard project](https://github.com/facebook/zstd) is used as a reference for format behavior, compatibility requirements, and interoperability testing.
+> `zstd.zig` implements the RFC 8878 format specification. The [Zstandard project](https://github.com/facebook/zstd) is used as a reference for format behavior, compatibility requirements, and interoperability testing.
 >
 > - **Streaming state machine** with sliding window history and fine-grained flushing directives (`.cont`, `.flush`, `.end`).
 > - **Finite State Entropy (FSE) & Huffman coding** - canonical tables, normalized frequency distributions, multi-stream decoding, and repeat table persistence.
@@ -39,7 +39,7 @@
 > - **LZ77 match finder** with 3-offset history registers and zero-literal repetitions.
 > - **Static and trained dictionaries** - load, create, train (`trainCover`, `trainFastCover`), and prepare dictionaries for state reuse.
 > - **Client-side concurrency** - thread-safe isolated contexts, zero implicit background threads, and worker pool integration.
-> - **Historic frame decoding** - complete support for legacy frames (v0.1 to v0.5) and skippable frames.
+> - **Historic frame decoding** - complete support for legacy frames (v0.1 to v0.7) and skippable frames.
 > - **Reusable contexts** - initialize once, compress/decompress multiple streams via `reset()`, eliminating allocation churn.
 
 ---
@@ -81,7 +81,7 @@
 
 | Requirement | Version | Notes |
 |---|---|---|
-| **Zig** | **0.17.0** (required) | Download from [ziglang.org](https://ziglang.org/download/). Zig 0.16.0 is not supported in v0.0.4+; use v0.0.3 for Zig 0.16.x. |
+| **Zig** | **0.17.0** (required) | Download from [ziglang.org](https://ziglang.org/download/). Zig 0.16.0 is not supported in v0.0.5+; use v0.0.3 for Zig 0.16.x. |
 | **Operating System** | Windows 10+, Linux, macOS | Cross-platform support |
 
 ---
@@ -123,11 +123,11 @@ zig build -Dtarget=x86-windows
 ### Method 1: Zig Fetch (Recommended) - Latest Release (Zig 0.17.0)
 
 ```bash
-zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.4.tar.gz
+zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.5.tar.gz
 ```
 
 > [!NOTE]
-> `zstd.zig` v0.0.4+ exclusively targets **Zig 0.17.0** (using new `std.Io` APIs and language builtins). **Zig 0.16.0 is not supported** in this release. If your project is on Zig 0.16.0, use the previous stable release `v0.0.3`:
+> `zstd.zig` v0.0.5+ exclusively targets **Zig 0.17.0** (using new `std.Io` APIs and language builtins). **Zig 0.16.0 is not supported** in this release. If your project is on Zig 0.16.0, use the previous stable release `v0.0.3`:
 >
 > ```bash
 > zig fetch --save https://github.com/muhammad-fiaz/zstd.zig/archive/refs/tags/0.0.3.tar.gz
@@ -274,26 +274,27 @@ The `examples/` directory contains complete, runnable examples:
 
 | Example | File | Description |
 |---|---|---|
-| `basic_compression` | `examples/basic_compression.zig` | Basic compress/decompress round trip |
-| `custom_level` | `examples/custom_level.zig` | Numeric compression levels 1-22 via `compressWithLevel` |
-| `advanced_params` | `examples/advanced_params.zig` | Custom window, checksum, and strategy via `CompressionOptions` |
-| `custom_strategy` | `examples/custom_strategy.zig` | All nine match-finding strategies compared |
-| `compression_bound` | `examples/compression_bound.zig` | Sizing an output buffer with `compressBound` |
-| `window_limit` | `examples/window_limit.zig` | Bounding the declared window a decoder accepts |
-| `frame_iteration` | `examples/frame_iteration.zig` | Walking frames in a buffer with `FrameIterator` |
-| `long_distance_matching` | `examples/long_distance_matching.zig` | Long-distance matching evaluation |
-| `parallel_compression` | `examples/parallel_compression.zig` | Application-managed threads, one context per worker |
-| `dictionary_compression` | `examples/dictionary_compression.zig` | Train a dictionary, compress against it, decode with it |
-| `dictionary_training` | `examples/dictionary_training.zig` | Training via `train`, `trainCover`, `trainFastCover` |
-| `prepared_dictionary` | `examples/prepared_dictionary.zig` | Preparing dictionary state once and reusing it |
-| `streaming_compression` | `examples/streaming_compression.zig` | Streaming compression with `StreamingCompressor` |
-| `streaming_decompression` | `examples/streaming_decompression.zig` | Streaming decompression with `StreamingDecompressor` |
-| `custom_allocator` | `examples/custom_allocator.zig` | Custom memory tracking allocator |
-| `error_handling` | `examples/error_handling.zig` | Corruption, truncation, and buffer error cases |
-| `legacy_decompression` | `examples/legacy_decompression.zig` | Historic frame detection for v01-v07 and skippable frames |
-| `file_compression` | `examples/file_compression.zig` | Real file compression, write to .zst archive, and decompression |
-| `explicit_io_streaming` | `examples/explicit_io_streaming.zig` | Chunked streaming file compression, decompression, and Encoder/Decoder contexts |
-| `large_file_compression` | `examples/large_file_compression.zig` | Multi-megabyte (4 MiB) compression, ratio inspection, and disk preservation |
+| [`basic_compression`](docs/examples/basic_compression.md) | [`examples/basic_compression.zig`](examples/basic_compression.zig) | Basic compress/decompress round trip |
+| [`custom_level`](docs/examples/custom_level.md) | [`examples/custom_level.zig`](examples/custom_level.zig) | Numeric compression levels 1-22 via `compressWithLevel` |
+| [`advanced_params`](docs/examples/advanced_params.md) | [`examples/advanced_params.zig`](examples/advanced_params.zig) | Custom window, checksum, and strategy via `CompressionOptions` |
+| [`custom_strategy`](docs/examples/custom_strategy.md) | [`examples/custom_strategy.zig`](examples/custom_strategy.zig) | All nine match-finding strategies compared |
+| [`compression_bound`](docs/examples/compression_bound.md) | [`examples/compression_bound.zig`](examples/compression_bound.zig) | Sizing an output buffer with `compressBound` |
+| [`window_limit`](docs/examples/window_limit.md) | [`examples/window_limit.zig`](examples/window_limit.zig) | Bounding the declared window a decoder accepts |
+| [`frame_iteration`](docs/examples/frame_iteration.md) | [`examples/frame_iteration.zig`](examples/frame_iteration.zig) | Walking frames in a buffer with `FrameIterator` |
+| [`long_distance_matching`](docs/examples/long_distance_matching.md) | [`examples/long_distance_matching.zig`](examples/long_distance_matching.zig) | Long-distance matching evaluation |
+| [`parallel_compression`](docs/examples/parallel_compression.md) | [`examples/parallel_compression.zig`](examples/parallel_compression.zig) | Application-managed threads, one context per worker |
+| [`dictionary_compression`](docs/examples/dictionary_compression.md) | [`examples/dictionary_compression.zig`](examples/dictionary_compression.zig) | Train a dictionary, compress against it, decode with it |
+| [`dictionary_training`](docs/examples/dictionary_training.md) | [`examples/dictionary_training.zig`](examples/dictionary_training.zig) | Training via `train`, `trainCover`, `trainFastCover` |
+| [`prepared_dictionary`](docs/examples/prepared_dictionary.md) | [`examples/prepared_dictionary.zig`](examples/prepared_dictionary.zig) | Preparing dictionary state once and reusing it |
+| [`streaming_compression`](docs/examples/streaming_compression.md) | [`examples/streaming_compression.zig`](examples/streaming_compression.zig) | Streaming compression with `StreamingCompressor` |
+| [`streaming_decompression`](docs/examples/streaming_decompression.md) | [`examples/streaming_decompression.zig`](examples/streaming_decompression.zig) | Streaming decompression with `StreamingDecompressor` |
+| [`custom_allocator`](docs/examples/custom_allocator.md) | [`examples/custom_allocator.zig`](examples/custom_allocator.zig) | Custom memory tracking allocator |
+| [`error_handling`](docs/examples/error_handling.md) | [`examples/error_handling.zig`](examples/error_handling.zig) | Corruption, truncation, and buffer error cases |
+| [`legacy_decompression`](docs/examples/legacy_decompression.md) | [`examples/legacy_decompression.zig`](examples/legacy_decompression.zig) | Historic frame detection for v01-v07 and skippable frames |
+| [`file_compression`](docs/examples/file_compression.md) | [`examples/file_compression.zig`](examples/file_compression.zig) | Real file compression, write to .zst archive, and decompression |
+| [`explicit_io_streaming`](docs/examples/explicit_io_streaming.md) | [`examples/explicit_io_streaming.zig`](examples/explicit_io_streaming.zig) | Chunked streaming file compression, decompression, and Encoder/Decoder contexts |
+| [`explicit_io_pipeline`](docs/examples/explicit_io_pipeline.md) | [`examples/explicit_io_pipeline.zig`](examples/explicit_io_pipeline.zig) | Explicit std.Io Reader/Writer pipeline streaming and parallel threaded compression |
+| [`large_file_compression`](docs/examples/large_file_compression.md) | [`examples/large_file_compression.zig`](examples/large_file_compression.zig) | Multi-megabyte (4 MiB) compression, ratio inspection, and disk preservation |
 
 Run any example:
 
@@ -302,7 +303,7 @@ zig build run-basic_compression
 zig build run-streaming_compression
 zig build run-explicit_io_streaming
 zig build run-large_file_compression
-zig build run-all-examples   # Run all 20 examples
+zig build run-all-examples   # Run all 21 examples
 ```
 
 ---
@@ -313,7 +314,7 @@ zig build run-all-examples   # Run all 20 examples
 zig build                    # Build native Zstandard library
 zig build test               # Run all unit and interoperability tests
 zig build test --summary all # Detailed test execution summary
-zig build run-all-examples   # Run all 20 example executables
+zig build run-all-examples   # Run all 21 example executables
 zig build check              # Compile tests and examples without running
 zig build docs               # Generate documentation in zig-out/docs/
 ```

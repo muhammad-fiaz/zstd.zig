@@ -30,7 +30,7 @@ pub const Dictionary = struct {
 
 pub fn loadDictionary(allocator: std.mem.Allocator, data: []const u8) errors.ZstdError!Dictionary {
     const buf = try allocator.alloc(u8, data.len);
-    std.mem.copyForwards(u8, buf, data);
+    @memcpy(buf, data);
     var dictId: u32 = 0;
     if (data.len >= 8 and bits.readLe32(data[0..4]) == constants.magic_dictionary) {
         dictId = bits.readLe32(data[4..8]);
@@ -42,7 +42,7 @@ pub fn createDictionaryFromData(allocator: std.mem.Allocator, data: []const u8, 
     var buf = try allocator.alloc(u8, data.len + 8);
     bits.writeLe32(buf[0..4], constants.magic_dictionary);
     bits.writeLe32(buf[4..8], dictId);
-    std.mem.copyForwards(u8, buf[8..], data);
+    @memcpy(buf[8..], data);
     return Dictionary{ .data = buf, .id = dictId, .allocator = allocator };
 }
 

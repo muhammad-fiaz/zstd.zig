@@ -141,4 +141,12 @@ defer allocator.free(decompressed);
 
 `zstd.Decompressor` is a direct alias for `zstd.DecompressionContext` matching client naming conventions.
 
+## Memory Management & Safety
+
+1. **Caller-Supplied Allocator**: Decompression contexts and one-shot functions never allocate from a hidden allocator; they strictly take `allocator: std.mem.Allocator`.
+2. **Context Deinitialization**: Always call `defer dctx.deinit()` or `defer decoder.deinit()`. This releases all streaming ring buffers, history buffers, and pre-allocated FSE/Huffman decoding tables.
+3. **Deallocated Slices**: Output slices from `decompressAlloc(...)` are caller-owned. Always release them using `defer allocator.free(decompressed)`.
+4. **Zero-Allocation Decoding**: Using `decompress(dst, src)` or `decompressInto(allocator, dst, src)` allows callers to decode directly into a fixed or stack-allocated buffer without additional heap allocations.
+5. **Memory Safety & Decompression Bombs**: The decoder enforces `maxWindowSize` (default 128 MiB). Untrusted frames specifying absurd window sizes are rejected with `error.WindowTooLarge` before allocating memory or writing output.
+
 

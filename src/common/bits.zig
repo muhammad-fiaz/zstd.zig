@@ -9,7 +9,8 @@ const builtin = @import("builtin");
 /// Index of the most significant set bit. `0` maps to `0`, matching the
 /// behaviour the format relies on when scanning symbol codes.
 pub fn highbit32(val: u32) u32 {
-    return 31 - @clz(val);
+    if (val == 0) return 0;
+    return std.math.log2_int(u32, val);
 }
 
 pub fn countTrailingZeros32(val: u32) u32 {
@@ -66,9 +67,7 @@ pub inline fn readLe16(src: []const u8) u16 {
 
 /// Read a little-endian `u24` (3 bytes) as `u32`.
 pub inline fn readLe24(src: []const u8) u32 {
-    return @as(u32, src[0]) |
-        (@as(u32, src[1]) << 8) |
-        (@as(u32, src[2]) << 16);
+    return std.mem.readInt(u24, src[0..3], .little);
 }
 
 pub inline fn writeLe64(dst: []u8, val: u64) void {
