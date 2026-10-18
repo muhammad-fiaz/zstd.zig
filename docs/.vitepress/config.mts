@@ -1,6 +1,6 @@
 import { defineConfig } from "vitepress";
 
-export const SITE_URL = "https://muhammad-fiaz.github.io/zstd.zig";
+export const SITE_URL = "https://muhammad-fiaz.github.io/zstd.zig/";
 export const SITE_NAME = "zstd.zig";
 export const SITE_DESCRIPTION =
   "A complete native Zig implementation of Zstandard compression. No C bindings, no dependencies. Supports compression, decompression, streaming, and dictionary-based operations.";
